@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { Toaster, toast } from 'vue-sonner'
 import ModelCard from './components/ModelCard.vue'
-import NoticeBanner from './components/NoticeBanner.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import RequestLogCard from './components/RequestLogCard.vue'
 import StatCard from './components/StatCard.vue'
@@ -28,7 +28,6 @@ const syncingProviderId = ref<number | null>(null)
 const editingProviderId = ref<number | null>(null)
 const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
-const notice = ref<{ tone: NoticeTone; text: string } | null>(null)
 const selectedModelDisableRule = ref<ModelDisableRuleSelection | null>(null)
 const requestLogLimit = 40
 
@@ -100,12 +99,18 @@ const curlExample = computed(() =>
 )
 
 function setNotice(tone: NoticeTone, text: string) {
-	notice.value = { tone, text }
+	if (tone === 'success') {
+		toast.success(text)
+		return
+	}
+	if (tone === 'error') {
+		toast.error(text)
+		return
+	}
+	toast(text)
 }
 
-function clearNotice() {
-	notice.value = null
-}
+function clearNotice() {}
 
 function reconcileSelectedModelDisableRule() {
 	const selection = selectedModelDisableRule.value
@@ -401,6 +406,7 @@ onMounted(() => {
 </script>
 
 <template>
+	<Toaster richColors position="top-right" />
 	<div data-anchor="dashboard" class="mx-auto grid w-[min(1240px,calc(100vw-32px))] gap-[22px] py-8 max-lg:w-[calc(100vw-24px)] max-lg:py-4">
 		<header
 			data-anchor="hero"
@@ -440,8 +446,6 @@ onMounted(() => {
 				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
 			</div>
 		</header>
-
-		<NoticeBanner v-if="notice" :tone="notice.tone" :text="notice.text" />
 
 		<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
 			<article
