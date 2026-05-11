@@ -2036,29 +2036,29 @@ func extractRequestTokenUsage(body string) (requestTokenUsage, bool) {
 		return requestTokenUsage{}, false
 	}
 
-	var payload struct {
-		Usage map[string]any `json:"usage"`
-	}
+	var payload map[string]any
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
 		return requestTokenUsage{}, false
 	}
-	if len(payload.Usage) == 0 {
+
+	usage := usageMap(payload)
+	if len(usage) == 0 {
 		return requestTokenUsage{}, false
 	}
 
-	inputTokens := usageMapInt64(payload.Usage, "prompt_tokens")
+	inputTokens := usageMapInt64(usage, "prompt_tokens")
 	if inputTokens == 0 {
-		inputTokens = usageMapInt64(payload.Usage, "input_tokens")
+		inputTokens = usageMapInt64(usage, "input_tokens")
 	}
 
-	outputTokens := usageMapInt64(payload.Usage, "completion_tokens")
+	outputTokens := usageMapInt64(usage, "completion_tokens")
 	if outputTokens == 0 {
-		outputTokens = usageMapInt64(payload.Usage, "output_tokens")
+		outputTokens = usageMapInt64(usage, "output_tokens")
 	}
 
-	cachedInputTokens := usageDetailsInt64(payload.Usage, "prompt_tokens_details", "cached_tokens")
+	cachedInputTokens := usageDetailsInt64(usage, "prompt_tokens_details", "cached_tokens")
 	if cachedInputTokens == 0 {
-		cachedInputTokens = usageDetailsInt64(payload.Usage, "input_tokens_details", "cached_tokens")
+		cachedInputTokens = usageDetailsInt64(usage, "input_tokens_details", "cached_tokens")
 	}
 	if cachedInputTokens > inputTokens {
 		cachedInputTokens = inputTokens
@@ -2074,6 +2074,22 @@ func extractRequestTokenUsage(body string) (requestTokenUsage, bool) {
 		NonCachedInputTokens: inputTokens - cachedInputTokens,
 		OutputTokens:         outputTokens,
 	}, true
+}
+
+// usageMap returns the top-level usage object for plain JSON responses and the
+// nested `response.usage` object for websocket terminal events.
+func usageMap(payload map[string]any) map[string]any {
+	if usage, ok := payload["usage"].(map[string]any); ok {
+		return usage
+	}
+
+	response, ok := payload["response"].(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	usage, _ := response["usage"].(map[string]any)
+	return usage
 }
 
 // usageMapInt64 reads an integer field from a generic usage map.

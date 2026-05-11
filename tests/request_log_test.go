@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/coder/websocket"
 	"github.com/silverling/aggr/server"
 	_ "modernc.org/sqlite"
 )
@@ -154,6 +156,42 @@ type testDeleteProxyRequestsResponse struct {
 type testGatewayAPIKeyCreateResponse struct {
 	// APIKey contains the raw bearer token that the server only returns once.
 	APIKey string `json:"apiKey"`
+}
+
+// testModelAliasPayload mirrors the subset of the alias API used by the test
+// helper that creates alias routes through the admin API.
+type testModelAliasPayload struct {
+	// AliasModelID is the public alias exposed by the gateway.
+	AliasModelID string `json:"aliasModelId"`
+	// TargetModelID is the upstream model name selected by the alias.
+	TargetModelID string `json:"targetModelId"`
+	// TargetProviderID optionally pins the alias to one provider.
+	TargetProviderID *int64 `json:"targetProviderId,omitempty"`
+}
+
+// websocketDialHeaderRoundTripper adds a bearer token to websocket handshake
+// requests so tests can authenticate `/v1/responses` websocket-mode sessions.
+type websocketDialHeaderRoundTripper struct {
+	// base is the transport used after the bearer token is added.
+	base http.RoundTripper
+	// apiKey is the raw bearer token added to the handshake request.
+	apiKey string
+}
+
+// RoundTrip injects the Authorization header into a websocket handshake request.
+func (roundTripper *websocketDialHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header = req.Header.Clone()
+	if clone.Header.Get("Authorization") == "" {
+		clone.Header.Set("Authorization", "Bearer "+roundTripper.apiKey)
+	}
+
+	base := roundTripper.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	return base.RoundTrip(clone)
 }
 
 // TestGatewayRequestLogsAndDeletion verifies that `/v1` traffic is audited and
@@ -335,6 +373,120 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 }
 
+// TestResponsesWebSocketMode verifies that `/v1/responses` websocket-mode
+// requests route to the correct provider, rewrite alias models before proxying,
+// and record the completed turn in the request audit log.
+func TestResponsesWebSocketMode(t *testing.T) {
+	t.Parallel()
+
+	var upstreamMu sync.Mutex
+	var upstreamPayloads []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
+			return
+		}
+
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			t.Errorf("accept upstream websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+
+		_, payload, err := conn.Read(context.Background())
+		if err != nil {
+			t.Errorf("read upstream websocket payload: %v", err)
+			return
+		}
+
+		upstreamMu.Lock()
+		upstreamPayloads = append(upstreamPayloads, string(payload))
+		upstreamMu.Unlock()
+
+		if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"response.completed","sequence_number":1,"response":{"id":"resp_test","status":"completed","usage":{"input_tokens":11,"input_tokens_details":{"cached_tokens":3},"output_tokens":7}}}`)); err != nil {
+			t.Errorf("write upstream websocket response: %v", err)
+			return
+		}
+
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer upstream.Close()
+
+	gatewayURL, client := newTestGatewayServer(t)
+	createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", "AggrWS/1.0")
+	createTestModelAlias(t, client, gatewayURL, "alias-responses", "gpt-4.1", nil)
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Responses websocket key")
+
+	conn, _, err := websocket.Dial(context.Background(), strings.Replace(gatewayURL, "http://", "ws://", 1)+"/v1/responses", &websocket.DialOptions{
+		HTTPClient: &http.Client{
+			Transport: &websocketDialHeaderRoundTripper{apiKey: apiKey},
+		},
+	})
+	if err != nil {
+		t.Fatalf("dial gateway websocket: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"response.create","response":{"model":"alias-responses","input":"hello"}}`)); err != nil {
+		t.Fatalf("write gateway websocket request: %v", err)
+	}
+
+	_, payload, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatalf("read gateway websocket response: %v", err)
+	}
+	if !strings.Contains(string(payload), `"type":"response.completed"`) {
+		t.Fatalf("gateway websocket payload = %q, want completed event", string(payload))
+	}
+
+	upstreamMu.Lock()
+	defer upstreamMu.Unlock()
+	if len(upstreamPayloads) != 1 {
+		t.Fatalf("upstream websocket payloads = %#v, want one proxied payload", upstreamPayloads)
+	}
+	if !strings.Contains(upstreamPayloads[0], `"model":"gpt-4.1"`) {
+		t.Fatalf("upstream websocket payload = %q, want rewritten upstream model", upstreamPayloads[0])
+	}
+	if strings.Contains(upstreamPayloads[0], `"model":"alias-responses"`) {
+		t.Fatalf("upstream websocket payload = %q, did not expect alias model name", upstreamPayloads[0])
+	}
+
+	var logsPayload testProxyRequestsResponse
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+	if len(logsPayload.Requests) == 0 {
+		t.Fatalf("request logs = %#v, want at least one log entry", logsPayload)
+	}
+
+	log := logsPayload.Requests[0]
+	if log.ReceivedRequest.Path != "/v1/responses" {
+		t.Fatalf("responses websocket request path = %q, want %q", log.ReceivedRequest.Path, "/v1/responses")
+	}
+	if log.ModelID != "alias-responses" {
+		t.Fatalf("responses websocket model = %q, want %q", log.ModelID, "alias-responses")
+	}
+	if log.SentRequest == nil {
+		t.Fatalf("responses websocket sent request = nil, want populated request snapshot")
+	}
+	if !strings.Contains(log.SentRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("responses websocket sent body = %q, want rewritten upstream model", log.SentRequest.Body)
+	}
+	if log.ReceivedResponse.Status != http.StatusOK {
+		t.Fatalf("responses websocket response status = %d, want %d", log.ReceivedResponse.Status, http.StatusOK)
+	}
+	if !strings.Contains(log.ReceivedResponse.Body, `"type":"response.completed"`) {
+		t.Fatalf("responses websocket response body = %q, want completed event", log.ReceivedResponse.Body)
+	}
+}
+
 // newTestGatewayServer starts the aggr HTTP handler against a temporary SQLite
 // database and returns the base URL together with an authenticated admin client.
 func newTestGatewayServer(t *testing.T) (string, *http.Client) {
@@ -415,6 +567,31 @@ func createNamedTestProvider(t *testing.T, client *http.Client, gatewayURL strin
 	}
 
 	return payload.Provider
+}
+
+// createTestModelAlias inserts one alias through the admin API so websocket
+// and HTTP routing tests can expose a stable public model name.
+func createTestModelAlias(t *testing.T, client *http.Client, gatewayURL string, aliasModelID string, targetModelID string, targetProviderID *int64) {
+	t.Helper()
+
+	body, err := json.Marshal(testModelAliasPayload{
+		AliasModelID:     aliasModelID,
+		TargetModelID:    targetModelID,
+		TargetProviderID: targetProviderID,
+	})
+	if err != nil {
+		t.Fatalf("encode model alias payload: %v", err)
+	}
+
+	doJSONRequest(
+		t,
+		client,
+		http.MethodPost,
+		gatewayURL+"/api/model-aliases",
+		string(body),
+		http.StatusCreated,
+		nil,
+	)
 }
 
 // createTestGatewayAPIKey creates one gateway API key through the admin API

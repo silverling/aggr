@@ -550,6 +550,11 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 
 // handleProxyOpenAI forwards OpenAI-compatible requests to the provider that serves the requested model.
 func (s *server) handleProxyOpenAI(w http.ResponseWriter, r *http.Request) {
+	if shouldHandleOpenAIResponsesWebSocket(r) {
+		s.proxyOpenAIWebSocket(w, r)
+		return
+	}
+
 	s.proxyOpenAIRequest(w, r)
 }
 

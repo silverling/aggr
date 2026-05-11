@@ -8,6 +8,8 @@
 - Syncs each provider's `/v1/models` catalog.
 - Aggregates `GET /v1/models` across enabled providers.
 - Routes other `/v1/*` requests by the `model` field in the request.
+- Supports Responses API websocket mode on `GET /v1/responses` and routes the
+  connection by the first `response.create` model on that socket.
 - Serves a Vue-based Web UI for provider management.
 
 ## Run it

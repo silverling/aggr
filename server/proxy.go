@@ -12,8 +12,10 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -21,6 +23,8 @@ import (
 const maxProxyBodyBytes = 32 << 20
 
 var errModelHintMissing = errors.New("model hint missing")
+
+const openAIResponsesWebSocketPath = "/v1/responses"
 
 // providerModelListResponse mirrors the upstream `/v1/models` payload.
 type providerModelListResponse struct {
@@ -54,6 +58,58 @@ type resolvedModelRoute struct {
 	UpstreamModelID string
 	// Provider is the enabled provider selected to handle the request.
 	Provider providerRecord
+}
+
+// responsesWebSocketClientEvent is the top-level client frame shape used by
+// OpenAI Responses WebSocket mode.
+type responsesWebSocketClientEvent struct {
+	// Type identifies the websocket event name, such as `response.create`.
+	Type string `json:"type"`
+	// Response carries the request payload for `response.create`.
+	Response map[string]any `json:"response"`
+}
+
+// responsesWebSocketServerEvent is the subset of upstream response event data
+// needed to finalize one audited websocket turn.
+type responsesWebSocketServerEvent struct {
+	// Type identifies the websocket event name.
+	Type string `json:"type"`
+	// Response carries terminal response metadata for completion, failure, and
+	// incomplete events.
+	Response map[string]any `json:"response"`
+	// Code is the error code emitted by `error` events.
+	Code string `json:"code"`
+	// Message is the human-readable error text emitted by `error` events.
+	Message string `json:"message"`
+}
+
+// responsesWebSocketAuditTurn tracks one `response.create` turn flowing across
+// a persistent websocket connection so the gateway can record it in the same
+// request-audit system used by HTTP proxy calls.
+type responsesWebSocketAuditTurn struct {
+	// LogID is the inserted audit row for this turn.
+	LogID int64
+	// StartedAt records when the turn began.
+	StartedAt time.Time
+	// RequestedModelID is the public model requested by the client.
+	RequestedModelID string
+	// Route is the resolved provider and upstream model selected for the turn.
+	Route resolvedModelRoute
+	// SentRequest stores the rewritten upstream request snapshot for auditing.
+	SentRequest proxyRequestSentCapture
+	// RequestPayload stores the exact rewritten `response.create` frame sent
+	// upstream.
+	RequestPayload []byte
+}
+
+// responsesWebSocketTurnState stores the currently active websocket turn behind
+// a mutex because the client-to-upstream and upstream-to-client loops run
+// concurrently.
+type responsesWebSocketTurnState struct {
+	// mu protects turn.
+	mu sync.Mutex
+	// turn is the active `response.create` request awaiting a terminal event.
+	turn *responsesWebSocketAuditTurn
 }
 
 // flushingWriter wraps a response writer so long-lived streamed responses flush
@@ -636,6 +692,449 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// shouldHandleOpenAIResponsesWebSocket reports whether the incoming request is
+// a WebSocket upgrade targeting the Responses API websocket-mode endpoint.
+func shouldHandleOpenAIResponsesWebSocket(r *http.Request) bool {
+	if r.URL.Path != openAIResponsesWebSocketPath {
+		return false
+	}
+
+	return headerContainsToken(r.Header, "Connection", "Upgrade") &&
+		headerContainsToken(r.Header, "Upgrade", "websocket")
+}
+
+// proxyOpenAIWebSocket accepts a client websocket for `/v1/responses`, routes
+// it to the provider selected by the first `response.create` turn, and proxies
+// subsequent frames while recording per-turn audit rows.
+func (s *server) proxyOpenAIWebSocket(w http.ResponseWriter, r *http.Request) {
+	clientConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		s.logger.Warn("accept responses websocket", "error", err)
+		return
+	}
+	defer clientConn.CloseNow()
+
+	ctx := context.Background()
+	turnState := &responsesWebSocketTurnState{}
+
+	clientMessageType, clientPayload, err := clientConn.Read(ctx)
+	if err != nil {
+		s.logger.Warn("read first websocket frame", "error", err)
+		_ = clientConn.Close(websocket.StatusPolicyViolation, "failed to read initial websocket message")
+		return
+	}
+
+	route, initialUpstreamPayload, turn, err := s.prepareResponsesWebSocketTurn(r, clientPayload)
+	if err != nil {
+		s.writeResponsesWebSocketGatewayError(ctx, clientConn, nil, err)
+		return
+	}
+	turnState.set(turn)
+
+	upstreamURL, err := ResolveProviderURL(route.Provider.BaseURL, openAIResponsesWebSocketPath, r.URL.RawQuery)
+	if err != nil {
+		s.writeResponsesWebSocketGatewayError(ctx, clientConn, turnState.take(), err)
+		return
+	}
+
+	upstreamHeaders := cloneHeadersForWebSocket(r.Header)
+	upstreamHeaders.Del("Authorization")
+	upstreamHeaders.Del("Host")
+	upstreamHeaders.Del("Cookie")
+	upstreamHeaders.Del("Origin")
+	upstreamHeaders.Set("User-Agent", route.Provider.UserAgent)
+
+	upstreamConn, response, err := websocket.Dial(ctx, toWebSocketURL(upstreamURL), &websocket.DialOptions{
+		HTTPClient: s.proxyClient,
+		HTTPHeader: upstreamHeaders,
+	})
+	if err != nil {
+		status := http.StatusBadGateway
+		if response != nil && response.StatusCode > 0 {
+			status = response.StatusCode
+		}
+		s.finalizeResponsesWebSocketTurn(turnState.take(), status, nil, fmt.Sprintf("upstream websocket dial failed: %v", err))
+		_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
+			"type":    "error",
+			"code":    "upstream_websocket_dial_failed",
+			"message": fmt.Sprintf("upstream websocket dial failed: %v", err),
+			"param":   "",
+		})
+		_ = clientConn.Close(websocket.StatusPolicyViolation, "upstream websocket dial failed")
+		return
+	}
+	defer upstreamConn.CloseNow()
+
+	currentTurn := turnState.current()
+	currentTurn.SentRequest = proxyRequestSentCapture{
+		Method:      http.MethodGet,
+		URL:         upstreamURL,
+		HeadersJSON: headersToAuditJSON(upstreamHeaders),
+		Body:        string(initialUpstreamPayload),
+	}
+
+	if err := upstreamConn.Write(ctx, clientMessageType, initialUpstreamPayload); err != nil {
+		s.finalizeResponsesWebSocketTurn(turnState.take(), http.StatusBadGateway, nil, fmt.Sprintf("write initial websocket frame upstream: %v", err))
+		_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
+			"type":    "error",
+			"code":    "upstream_write_failed",
+			"message": fmt.Sprintf("write initial websocket frame upstream: %v", err),
+			"param":   "",
+		})
+		_ = clientConn.Close(websocket.StatusPolicyViolation, "upstream write failed")
+		return
+	}
+
+	upstreamDone := make(chan error, 1)
+	go func() {
+		upstreamDone <- s.proxyResponsesWebSocketUpstreamToClient(ctx, clientConn, upstreamConn, turnState)
+	}()
+
+	for {
+		messageType, payload, readErr := clientConn.Read(ctx)
+		if readErr != nil {
+			_ = upstreamConn.Close(websocket.StatusNormalClosure, "")
+			upstreamErr := <-upstreamDone
+			if pendingTurn := turnState.take(); pendingTurn != nil {
+				s.finalizeResponsesWebSocketTurn(pendingTurn, http.StatusBadGateway, nil, "client websocket closed before the response finished")
+			}
+			if upstreamErr != nil {
+				s.logger.Warn("proxy responses websocket upstream loop", "error", upstreamErr)
+			}
+			return
+		}
+
+		nextRoute, nextPayload, nextTurn, rewriteErr := s.prepareResponsesWebSocketTurn(r, payload)
+		if rewriteErr != nil {
+			s.writeResponsesWebSocketGatewayError(ctx, clientConn, nil, rewriteErr)
+			continue
+		}
+		if nextTurn != nil {
+			if route.Provider.ID != nextRoute.Provider.ID {
+				s.finalizeResponsesWebSocketTurn(nextTurn, http.StatusBadRequest, nil, "websocket mode cannot switch providers after the connection is established")
+				_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
+					"type":    "error",
+					"code":    "provider_switch_not_supported",
+					"message": "websocket mode cannot switch providers after the connection is established",
+					"param":   "response.model",
+				})
+				continue
+			}
+
+			nextTurn.SentRequest = proxyRequestSentCapture{
+				Method:      http.MethodGet,
+				URL:         upstreamURL,
+				HeadersJSON: headersToAuditJSON(upstreamHeaders),
+				Body:        string(nextPayload),
+			}
+			turnState.set(nextTurn)
+			payload = nextPayload
+		}
+
+		if err := upstreamConn.Write(ctx, messageType, payload); err != nil {
+			if pendingTurn := turnState.take(); pendingTurn != nil {
+				s.finalizeResponsesWebSocketTurn(pendingTurn, http.StatusBadGateway, nil, fmt.Sprintf("write websocket frame upstream: %v", err))
+			}
+			_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
+				"type":    "error",
+				"code":    "upstream_write_failed",
+				"message": fmt.Sprintf("write websocket frame upstream: %v", err),
+				"param":   "",
+			})
+			_ = upstreamConn.Close(websocket.StatusPolicyViolation, "upstream write failed")
+			_ = clientConn.Close(websocket.StatusPolicyViolation, "upstream write failed")
+			<-upstreamDone
+			return
+		}
+	}
+}
+
+// prepareResponsesWebSocketTurn validates one client websocket frame, resolves
+// routing for `response.create` events, rewrites alias models, and inserts a
+// request-audit row for that turn.
+func (s *server) prepareResponsesWebSocketTurn(r *http.Request, payload []byte) (resolvedModelRoute, []byte, *responsesWebSocketAuditTurn, error) {
+	var event responsesWebSocketClientEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return resolvedModelRoute{}, nil, nil, fmt.Errorf("decode websocket payload: %w", err)
+	}
+
+	if event.Type != "response.create" {
+		return resolvedModelRoute{}, payload, nil, nil
+	}
+
+	requestedModelID, err := extractResponsesWebSocketModelHint(r, event)
+	if err != nil {
+		return resolvedModelRoute{}, nil, nil, err
+	}
+
+	route, err := s.resolveModelRoute(r.Context(), requestedModelID)
+	if err != nil {
+		if errors.Is(err, errProviderNotFound) {
+			return resolvedModelRoute{}, nil, nil, fmt.Errorf("no enabled provider serves model %q", requestedModelID)
+		}
+		return resolvedModelRoute{}, nil, nil, err
+	}
+
+	rewrittenPayload, err := rewriteResponsesWebSocketEventModel(payload, route.UpstreamModelID)
+	if err != nil {
+		return resolvedModelRoute{}, nil, nil, err
+	}
+
+	auditContext := context.Background()
+	logID := s.createProxyRequestAudit(auditContext, &http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Path:     r.URL.Path,
+			RawQuery: r.URL.RawQuery,
+		},
+		Header: r.Header.Clone(),
+	}, requestedModelID, payload)
+
+	return route, rewrittenPayload, &responsesWebSocketAuditTurn{
+		LogID:            logID,
+		StartedAt:        time.Now(),
+		RequestedModelID: requestedModelID,
+		Route:            route,
+		RequestPayload:   rewrittenPayload,
+	}, nil
+}
+
+// proxyResponsesWebSocketUpstreamToClient copies upstream websocket frames to
+// the client and finalizes the active audit turn when a terminal response event
+// arrives.
+func (s *server) proxyResponsesWebSocketUpstreamToClient(ctx context.Context, clientConn *websocket.Conn, upstreamConn *websocket.Conn, turnState *responsesWebSocketTurnState) error {
+	for {
+		messageType, payload, err := upstreamConn.Read(ctx)
+		if err != nil {
+			return err
+		}
+
+		if turn := turnState.current(); turn != nil {
+			if finalized := s.tryFinalizeResponsesWebSocketTurn(turn, payload); finalized {
+				turnState.clearCurrent(turn.LogID)
+			}
+		}
+
+		if err := clientConn.Write(ctx, messageType, payload); err != nil {
+			return err
+		}
+	}
+}
+
+// tryFinalizeResponsesWebSocketTurn inspects one upstream websocket payload
+// and finalizes the current turn when it reaches a terminal response event.
+func (s *server) tryFinalizeResponsesWebSocketTurn(turn *responsesWebSocketAuditTurn, payload []byte) bool {
+	var event responsesWebSocketServerEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return false
+	}
+
+	switch event.Type {
+	case "response.completed":
+		s.finalizeResponsesWebSocketTurn(turn, http.StatusOK, payload, "")
+		return true
+	case "response.failed":
+		s.finalizeResponsesWebSocketTurn(turn, http.StatusBadGateway, payload, extractResponsesWebSocketResponseError(event.Response))
+		return true
+	case "response.incomplete":
+		s.finalizeResponsesWebSocketTurn(turn, http.StatusBadGateway, payload, "response incomplete")
+		return true
+	case "error":
+		status := http.StatusBadGateway
+		if turn.LogID == 0 {
+			status = http.StatusBadRequest
+		}
+		errorText := strings.TrimSpace(event.Message)
+		if errorText == "" {
+			errorText = strings.TrimSpace(event.Code)
+		}
+		s.finalizeResponsesWebSocketTurn(turn, status, payload, errorText)
+		return true
+	default:
+		return false
+	}
+}
+
+// finalizeResponsesWebSocketTurn persists the completed audit record for one
+// websocket-mode Responses turn.
+func (s *server) finalizeResponsesWebSocketTurn(turn *responsesWebSocketAuditTurn, responseStatus int, responsePayload []byte, errorText string) {
+	if turn == nil {
+		return
+	}
+
+	responseHeaders := http.Header{}
+	responseHeaders.Set("Content-Type", "application/json")
+	responseHeaders.Set("X-Aggr-Provider", turn.Route.Provider.Name)
+	if turn.RequestedModelID != "" {
+		responseHeaders.Set("X-Aggr-Model", turn.RequestedModelID)
+	}
+
+	responseBody, responseBodyTruncated := truncateAuditBytes(responsePayload)
+	s.completeProxyRequestAudit(context.Background(), turn.LogID, proxyRequestLogUpdate{
+		SentMethod:            turn.SentRequest.Method,
+		SentURL:               turn.SentRequest.URL,
+		SentHeaders:           turn.SentRequest.HeadersJSON,
+		SentBody:              turn.SentRequest.Body,
+		SentBodyTruncated:     turn.SentRequest.BodyTruncated,
+		ProviderID:            &turn.Route.Provider.ID,
+		ProviderName:          turn.Route.Provider.Name,
+		ResponseStatus:        responseStatus,
+		ResponseHeaders:       headersToAuditJSON(responseHeaders),
+		ResponseBody:          responseBody,
+		ResponseBodyTruncated: responseBodyTruncated,
+		ErrorText:             strings.TrimSpace(errorText),
+		DurationMS:            time.Since(turn.StartedAt).Milliseconds(),
+		CompletedAt:           time.Now(),
+	})
+}
+
+// writeResponsesWebSocketGatewayError returns a gateway-generated websocket
+// error frame to the client and finalizes the current turn when one exists.
+func (s *server) writeResponsesWebSocketGatewayError(ctx context.Context, clientConn *websocket.Conn, turn *responsesWebSocketAuditTurn, err error) {
+	message := strings.TrimSpace(err.Error())
+	if turn != nil {
+		s.finalizeResponsesWebSocketTurn(turn, http.StatusBadRequest, nil, message)
+	}
+
+	_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
+		"type":    "error",
+		"code":    "gateway_error",
+		"message": message,
+		"param":   "",
+	})
+}
+
+// extractResponsesWebSocketModelHint reads the requested public model name from
+// a websocket-mode `response.create` event or the `model` query parameter.
+func extractResponsesWebSocketModelHint(r *http.Request, event responsesWebSocketClientEvent) (string, error) {
+	if event.Type != "response.create" {
+		return "", errModelHintMissing
+	}
+
+	if modelValue, ok := event.Response["model"]; ok {
+		if modelID, ok := modelValue.(string); ok && strings.TrimSpace(modelID) != "" {
+			return strings.TrimSpace(modelID), nil
+		}
+	}
+
+	if modelID := strings.TrimSpace(r.URL.Query().Get("model")); modelID != "" {
+		return modelID, nil
+	}
+
+	return "", errors.New("responses websocket mode requires a model in the response.create payload or the model query parameter")
+}
+
+// rewriteResponsesWebSocketEventModel rewrites the nested `response.model`
+// field in a websocket-mode client event.
+func rewriteResponsesWebSocketEventModel(payload []byte, upstreamModelID string) ([]byte, error) {
+	var event map[string]any
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, fmt.Errorf("decode websocket event for model rewrite: %w", err)
+	}
+
+	responsePayload, ok := event["response"].(map[string]any)
+	if !ok {
+		return append([]byte(nil), payload...), nil
+	}
+
+	if _, found := responsePayload["model"]; found {
+		responsePayload["model"] = upstreamModelID
+	}
+
+	rewritten, err := json.Marshal(event)
+	if err != nil {
+		return nil, fmt.Errorf("encode rewritten websocket event: %w", err)
+	}
+
+	return rewritten, nil
+}
+
+// extractResponsesWebSocketResponseError reads a terminal error message from a
+// Responses websocket response object when one is present.
+func extractResponsesWebSocketResponseError(response map[string]any) string {
+	errorValue, ok := response["error"].(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	if message, ok := errorValue["message"].(string); ok {
+		return strings.TrimSpace(message)
+	}
+
+	if code, ok := errorValue["code"].(string); ok {
+		return strings.TrimSpace(code)
+	}
+
+	return ""
+}
+
+// cloneHeadersForWebSocket copies request headers so websocket dials can pass
+// through supported values without mutating the inbound request.
+func cloneHeadersForWebSocket(headers http.Header) http.Header {
+	cloned := make(http.Header, len(headers))
+	for key, values := range headers {
+		cloned[key] = append([]string(nil), values...)
+	}
+	return cloned
+}
+
+// toWebSocketURL converts an HTTP(S) endpoint into its websocket equivalent.
+func toWebSocketURL(raw string) string {
+	if strings.HasPrefix(raw, "https://") {
+		return "wss://" + strings.TrimPrefix(raw, "https://")
+	}
+	if strings.HasPrefix(raw, "http://") {
+		return "ws://" + strings.TrimPrefix(raw, "http://")
+	}
+	return raw
+}
+
+// writeResponsesWebSocketJSON sends one JSON websocket frame to the caller.
+func writeResponsesWebSocketJSON(ctx context.Context, conn *websocket.Conn, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode websocket payload: %w", err)
+	}
+
+	return conn.Write(ctx, websocket.MessageText, body)
+}
+
+// set replaces the currently active websocket turn.
+func (state *responsesWebSocketTurnState) set(turn *responsesWebSocketAuditTurn) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.turn = turn
+}
+
+// current returns the currently active websocket turn without removing it.
+func (state *responsesWebSocketTurnState) current() *responsesWebSocketAuditTurn {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.turn
+}
+
+// take removes and returns the currently active websocket turn.
+func (state *responsesWebSocketTurnState) take() *responsesWebSocketAuditTurn {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	turn := state.turn
+	state.turn = nil
+	return turn
+}
+
+// clearCurrent removes the active websocket turn when it matches the provided
+// audit log ID, which avoids clearing a newly-started turn due to a race with
+// the upstream reader loop.
+func (state *responsesWebSocketTurnState) clearCurrent(logID int64) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.turn != nil && state.turn.LogID == logID {
+		state.turn = nil
+	}
+}
+
 // toOpenAIModels converts the aggregated route table into the OpenAI models-list response shape.
 func toOpenAIModels(routeModels []routeModelView) openAIModelListResponse {
 	data := make([]openAIModelResponse, 0, len(routeModels))
@@ -679,4 +1178,18 @@ func isHopByHopHeader(name string) bool {
 	default:
 		return false
 	}
+}
+
+// headerContainsToken reports whether a comma-delimited header contains the
+// provided token, ignoring ASCII case and optional surrounding whitespace.
+func headerContainsToken(headers http.Header, name string, token string) bool {
+	for _, rawValue := range headers.Values(name) {
+		for _, part := range strings.Split(rawValue, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
