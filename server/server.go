@@ -18,13 +18,21 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Config captures the runtime settings for the HTTP server, SQLite database,
+// and development UI proxy.
 type Config struct {
-	Addr         string
+	// Addr is the TCP listen address for the HTTP server, such as `:8080`.
+	Addr string
+	// DatabasePath is the filesystem path for the SQLite database file.
 	DatabasePath string
-	Environment  string
-	WebDevURL    string
+	// Environment records whether the process is running in production or dev mode.
+	Environment string
+	// WebDevURL points at the Vite dev server when the UI should be proxied live.
+	WebDevURL string
 }
 
+// server owns the HTTP mux, persistence layer, upstream clients, and optional
+// dev proxy used to serve the UI in development.
 type server struct {
 	cfg         Config
 	logger      *slog.Logger
@@ -34,17 +42,25 @@ type server struct {
 	devProxy    *httputil.ReverseProxy
 }
 
+// providerPayload is the JSON body accepted by the provider create and update APIs.
 type providerPayload struct {
-	Name    string `json:"name"`
+	// Name is the user-facing provider label shown in the UI.
+	Name string `json:"name"`
+	// BaseURL is the OpenAI-compatible root endpoint for the upstream provider.
 	BaseURL string `json:"baseUrl"`
-	APIKey  string `json:"apiKey"`
-	Enabled *bool  `json:"enabled"`
+	// APIKey is the bearer token used when calling the upstream provider.
+	APIKey string `json:"apiKey"`
+	// Enabled toggles whether the provider can be selected for routing.
+	Enabled *bool `json:"enabled"`
 }
 
+// syncAllResponse reports the per-provider result of a bulk model catalog sync.
 type syncAllResponse struct {
 	Results map[int64]string `json:"results"`
 }
 
+// newServer constructs the application, applies database migrations, and wires
+// together the API handlers with their supporting clients.
 func newServer(cfg Config, db *sql.DB, logger *slog.Logger) (*server, error) {
 	st := newStore(db)
 	if err := st.migrate(context.Background()); err != nil {
@@ -76,6 +92,8 @@ func newServer(cfg Config, db *sql.DB, logger *slog.Logger) (*server, error) {
 	return instance, nil
 }
 
+// routes builds the full HTTP mux for health checks, provider admin APIs,
+// OpenAI-compatible proxy endpoints, and the UI entrypoint.
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
@@ -93,12 +111,14 @@ func (s *server) routes() http.Handler {
 	return s.withLogging(s.withCORS(mux))
 }
 
+// handleHealth returns a small JSON payload used for liveness and readiness probes.
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status": "ok",
 	})
 }
 
+// handleListProviders returns the configured providers with their synced model lists.
 func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	providers, err := s.store.listProviderViews(r.Context())
 	if err != nil {
@@ -111,6 +131,7 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleCreateProvider inserts a new provider, syncs its model catalog, and returns the saved record.
 func (s *server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	mutation, err := decodeProviderPayload(r, false)
 	if err != nil {
@@ -139,6 +160,7 @@ func (s *server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUpdateProvider updates a provider, refreshes its model catalog, and returns the saved record.
 func (s *server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	id, err := parseProviderID(r.PathValue("id"))
 	if err != nil {
@@ -177,6 +199,7 @@ func (s *server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleDeleteProvider removes a provider and cascades its model mappings.
 func (s *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	id, err := parseProviderID(r.PathValue("id"))
 	if err != nil {
@@ -196,6 +219,7 @@ func (s *server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSyncProvider refreshes a single provider's model catalog from its upstream API.
 func (s *server) handleSyncProvider(w http.ResponseWriter, r *http.Request) {
 	id, err := parseProviderID(r.PathValue("id"))
 	if err != nil {
@@ -229,6 +253,7 @@ func (s *server) handleSyncProvider(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSyncAllProviders refreshes every configured provider and returns the outcome map.
 func (s *server) handleSyncAllProviders(w http.ResponseWriter, r *http.Request) {
 	results := s.syncAllProviders(r.Context())
 	writeJSON(w, http.StatusOK, syncAllResponse{
@@ -236,6 +261,7 @@ func (s *server) handleSyncAllProviders(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleListModels returns the aggregated route table used by the UI.
 func (s *server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	models, err := s.store.listRouteModels(r.Context())
 	if err != nil {
@@ -248,6 +274,7 @@ func (s *server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleListOpenAIModels returns the aggregated route table in OpenAI's models-list shape.
 func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) {
 	models, err := s.store.listRouteModels(r.Context())
 	if err != nil {
@@ -258,10 +285,12 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, toOpenAIModels(models))
 }
 
+// handleProxyOpenAI forwards OpenAI-compatible requests to the provider that serves the requested model.
 func (s *server) handleProxyOpenAI(w http.ResponseWriter, r *http.Request) {
 	s.proxyOpenAIRequest(w, r)
 }
 
+// Run opens the SQLite database, starts the HTTP server, and blocks until the process exits.
 func Run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -303,6 +332,7 @@ func Run() error {
 	return nil
 }
 
+// loadConfig reads environment variables and fills in the defaults used to start the process.
 func loadConfig() Config {
 	environment := getenv("AGGR_ENV", "prod")
 	webDevURL := strings.TrimSpace(os.Getenv("AGGR_WEB_DEV_URL"))
@@ -318,6 +348,7 @@ func loadConfig() Config {
 	}
 }
 
+// getenv returns a trimmed environment variable value or the provided fallback when it is empty.
 func getenv(key, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
@@ -325,6 +356,7 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
+// handleUI serves the dev proxy during local development and the embedded HTML in production.
 func (s *server) handleUI(w http.ResponseWriter, r *http.Request) {
 	if s.devProxy != nil {
 		s.devProxy.ServeHTTP(w, r)
@@ -335,6 +367,7 @@ func (s *server) handleUI(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(embeddedIndexHTML))
 }
 
+// withLogging wraps a handler so each request is logged with its method, path, and duration.
 func (s *server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startedAt := time.Now()
@@ -343,6 +376,7 @@ func (s *server) withLogging(next http.Handler) http.Handler {
 	})
 }
 
+// withCORS adds permissive CORS headers so the UI and external clients can call the API.
 func (s *server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -357,6 +391,7 @@ func (s *server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+// decodeProviderPayload parses the provider form body and validates the required fields.
 func decodeProviderPayload(r *http.Request, allowEmptyAPIKey bool) (providerMutation, error) {
 	var payload providerPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -365,6 +400,7 @@ func decodeProviderPayload(r *http.Request, allowEmptyAPIKey bool) (providerMuta
 	return payload.validate(allowEmptyAPIKey)
 }
 
+// decodeProviderPayloadForUpdate parses update payloads and reports whether the API key should be preserved.
 func decodeProviderPayloadForUpdate(r *http.Request) (providerMutation, bool, error) {
 	var payload providerPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -379,6 +415,7 @@ func decodeProviderPayloadForUpdate(r *http.Request) (providerMutation, bool, er
 	return mutation, strings.TrimSpace(payload.APIKey) == "", nil
 }
 
+// validate normalizes the provider payload and converts it into a store mutation.
 func (payload providerPayload) validate(allowEmptyAPIKey bool) (providerMutation, error) {
 	name := strings.TrimSpace(payload.Name)
 	if name == "" {
@@ -408,6 +445,7 @@ func (payload providerPayload) validate(allowEmptyAPIKey bool) (providerMutation
 	}, nil
 }
 
+// parseProviderID converts a path parameter into a positive provider identifier.
 func parseProviderID(raw string) (int64, error) {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
@@ -416,6 +454,7 @@ func parseProviderID(raw string) (int64, error) {
 	return id, nil
 }
 
+// writeJSON writes a JSON response with the provided status code.
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -424,6 +463,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
+// writeError writes a JSON error envelope with the provided status code.
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{
 		"error": message,

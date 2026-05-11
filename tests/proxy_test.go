@@ -9,6 +9,7 @@ import (
 	"github.com/silverling/aggr/server"
 )
 
+// TestResolveProviderURL verifies that provider base URLs and gateway paths are merged correctly.
 func TestResolveProviderURL(t *testing.T) {
 	t.Parallel()
 
@@ -56,6 +57,7 @@ func TestResolveProviderURL(t *testing.T) {
 	}
 }
 
+// TestExtractModelHint verifies the request model extraction rules used by the proxy layer.
 func TestExtractModelHint(t *testing.T) {
 	t.Parallel()
 

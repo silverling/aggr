@@ -12,56 +12,91 @@ import (
 
 var errProviderNotFound = errors.New("provider not found")
 
+// providerRecord is the internal database representation of a configured provider.
 type providerRecord struct {
-	ID           int64
-	Name         string
-	BaseURL      string
-	APIKey       string
-	Enabled      bool
-	Models       []string
-	LastError    string
+	// ID is the database primary key for the provider.
+	ID int64
+	// Name is the user-visible provider label.
+	Name string
+	// BaseURL is the upstream OpenAI-compatible API root.
+	BaseURL string
+	// APIKey is the bearer token stored for the provider.
+	APIKey string
+	// Enabled controls whether the provider may be selected for routing.
+	Enabled bool
+	// Models contains the synced model IDs currently associated with the provider.
+	Models []string
+	// LastError stores the most recent catalog sync error message, if any.
+	LastError string
+	// LastSyncedAt records when the provider catalog was last refreshed.
 	LastSyncedAt *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// CreatedAt records when the provider row was inserted.
+	CreatedAt time.Time
+	// UpdatedAt records when the provider row was last modified.
+	UpdatedAt time.Time
 }
 
+// providerView is the redacted provider payload returned to the UI.
 type providerView struct {
-	ID               int64    `json:"id"`
-	Name             string   `json:"name"`
-	BaseURL          string   `json:"baseUrl"`
-	Enabled          bool     `json:"enabled"`
-	Models           []string `json:"models"`
-	LastError        string   `json:"lastError,omitempty"`
-	LastSyncedAt     string   `json:"lastSyncedAt,omitempty"`
-	APIKeyConfigured bool     `json:"apiKeyConfigured"`
-	APIKeyPreview    string   `json:"apiKeyPreview,omitempty"`
+	// ID is the provider identifier.
+	ID int64 `json:"id"`
+	// Name is the display label shown in the UI.
+	Name string `json:"name"`
+	// BaseURL is the upstream endpoint configured for the provider.
+	BaseURL string `json:"baseUrl"`
+	// Enabled reports whether the provider can participate in routing.
+	Enabled bool `json:"enabled"`
+	// Models lists the provider's synced model IDs.
+	Models []string `json:"models"`
+	// LastError exposes the most recent sync error, if one exists.
+	LastError string `json:"lastError,omitempty"`
+	// LastSyncedAt is the UTC timestamp of the last successful sync.
+	LastSyncedAt string `json:"lastSyncedAt,omitempty"`
+	// APIKeyConfigured indicates whether a key has been stored for the provider.
+	APIKeyConfigured bool `json:"apiKeyConfigured"`
+	// APIKeyPreview shows a masked preview of the stored API key.
+	APIKeyPreview string `json:"apiKeyPreview,omitempty"`
 }
 
+// routeProviderView is the public provider summary attached to an aggregated model.
 type routeProviderView struct {
-	ID   int64  `json:"id"`
+	// ID is the provider identifier.
+	ID int64 `json:"id"`
+	// Name is the provider name used in the UI.
 	Name string `json:"name"`
 }
 
+// routeModelView is the internal aggregation structure for one routable model.
 type routeModelView struct {
-	ID        string              `json:"id"`
+	// ID is the model identifier.
+	ID string `json:"id"`
+	// Providers lists the enabled providers that currently serve the model.
 	Providers []routeProviderView `json:"providers"`
 }
 
+// providerMutation captures the normalized fields used when creating or updating a provider.
 type providerMutation struct {
-	Name    string
+	// Name is the normalized provider label.
+	Name string
+	// BaseURL is the normalized upstream base URL.
 	BaseURL string
-	APIKey  string
+	// APIKey is the trimmed upstream API key.
+	APIKey string
+	// Enabled indicates whether the provider should be routable.
 	Enabled bool
 }
 
+// store wraps the SQLite connection and exposes all persistence operations.
 type store struct {
 	db *sql.DB
 }
 
+// newStore creates a store backed by the provided database handle.
 func newStore(db *sql.DB) *store {
 	return &store{db: db}
 }
 
+// migrate creates the tables and indexes required by the application.
 func (s *store) migrate(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA foreign_keys = ON;`,
@@ -95,6 +130,7 @@ func (s *store) migrate(ctx context.Context) error {
 	return nil
 }
 
+// listProviders returns all providers ordered by enabled status and name.
 func (s *store) listProviders(ctx context.Context) ([]providerRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, base_url, api_key, enabled, last_error, last_synced_at, created_at, updated_at
@@ -125,6 +161,7 @@ func (s *store) listProviders(ctx context.Context) ([]providerRecord, error) {
 	return providers, nil
 }
 
+// listProviderViews returns redacted provider data for the UI.
 func (s *store) listProviderViews(ctx context.Context) ([]providerView, error) {
 	providers, err := s.listProviders(ctx)
 	if err != nil {
@@ -139,10 +176,12 @@ func (s *store) listProviderViews(ctx context.Context) ([]providerView, error) {
 	return views, nil
 }
 
+// getProvider retrieves a provider together with its synced models.
 func (s *store) getProvider(ctx context.Context, id int64) (providerRecord, error) {
 	return s.getProviderWithModels(ctx, id)
 }
 
+// getProviderWithModels loads one provider and its model list from the database.
 func (s *store) getProviderWithModels(ctx context.Context, id int64) (providerRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, base_url, api_key, enabled, last_error, last_synced_at, created_at, updated_at
@@ -166,6 +205,7 @@ func (s *store) getProviderWithModels(ctx context.Context, id int64) (providerRe
 	return record, nil
 }
 
+// createProvider inserts a provider and returns the persisted row.
 func (s *store) createProvider(ctx context.Context, mutation providerMutation) (providerRecord, error) {
 	now := nowRFC3339()
 	result, err := s.db.ExecContext(ctx, `
@@ -184,6 +224,7 @@ func (s *store) createProvider(ctx context.Context, mutation providerMutation) (
 	return s.getProviderWithModels(ctx, id)
 }
 
+// updateProvider updates a provider while optionally preserving the stored API key.
 func (s *store) updateProvider(ctx context.Context, id int64, mutation providerMutation, keepAPIKey bool) (providerRecord, error) {
 	current, err := s.getProviderWithModels(ctx, id)
 	if err != nil {
@@ -215,6 +256,7 @@ func (s *store) updateProvider(ctx context.Context, id int64, mutation providerM
 	return s.getProviderWithModels(ctx, id)
 }
 
+// deleteProvider removes a provider and its model mappings.
 func (s *store) deleteProvider(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id = ?`, id)
 	if err != nil {
@@ -232,6 +274,7 @@ func (s *store) deleteProvider(ctx context.Context, id int64) error {
 	return nil
 }
 
+// syncProviderModels replaces the provider's model mapping set with the provided IDs.
 func (s *store) syncProviderModels(ctx context.Context, id int64, modelIDs []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -273,6 +316,7 @@ func (s *store) syncProviderModels(ctx context.Context, id int64, modelIDs []str
 	return nil
 }
 
+// setProviderSyncError stores the latest catalog sync failure for the provider.
 func (s *store) setProviderSyncError(ctx context.Context, id int64, syncErr error) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE providers
@@ -294,6 +338,7 @@ func (s *store) setProviderSyncError(ctx context.Context, id int64, syncErr erro
 	return nil
 }
 
+// listRouteModels returns the aggregated routable models and their enabled providers.
 func (s *store) listRouteModels(ctx context.Context) ([]routeModelView, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT pm.model_id, p.id, p.name
@@ -340,6 +385,7 @@ func (s *store) listRouteModels(ctx context.Context) ([]routeModelView, error) {
 	return models, nil
 }
 
+// findProviderForModel returns the most recent enabled provider that serves a model.
 func (s *store) findProviderForModel(ctx context.Context, modelID string) (providerRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT p.id, p.name, p.base_url, p.api_key, p.enabled, p.last_error, p.last_synced_at, p.created_at, p.updated_at
@@ -362,6 +408,7 @@ func (s *store) findProviderForModel(ctx context.Context, modelID string) (provi
 	return record, nil
 }
 
+// attachModels populates the model lists for a batch of provider records.
 func (s *store) attachModels(ctx context.Context, providers []providerRecord) error {
 	if len(providers) == 0 {
 		return nil
@@ -383,6 +430,7 @@ func (s *store) attachModels(ctx context.Context, providers []providerRecord) er
 	return nil
 }
 
+// listModelsForProvider returns the sorted model IDs stored for one provider.
 func (s *store) listModelsForProvider(ctx context.Context, providerID int64) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT model_id
@@ -411,6 +459,7 @@ func (s *store) listModelsForProvider(ctx context.Context, providerID int64) ([]
 	return models, nil
 }
 
+// scanProvider reads a provider row from either a query row or rows iterator.
 func scanProvider(scanner interface {
 	Scan(dest ...any) error
 }) (providerRecord, error) {
@@ -462,6 +511,7 @@ func scanProvider(scanner interface {
 	return record, nil
 }
 
+// toView converts the internal provider record into the redacted UI payload.
 func (p providerRecord) toView() providerView {
 	view := providerView{
 		ID:               p.ID,
@@ -479,6 +529,7 @@ func (p providerRecord) toView() providerView {
 	return view
 }
 
+// maskAPIKey keeps only a short prefix and suffix so the UI can show a safe preview.
 func maskAPIKey(apiKey string) string {
 	if apiKey == "" {
 		return ""
@@ -489,6 +540,7 @@ func maskAPIKey(apiKey string) string {
 	return fmt.Sprintf("%s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
 }
 
+// boolToInt converts a boolean flag into SQLite's integer representation.
 func boolToInt(value bool) int {
 	if value {
 		return 1
@@ -496,10 +548,12 @@ func boolToInt(value bool) int {
 	return 0
 }
 
+// nowRFC3339 returns the current UTC timestamp formatted for SQLite storage.
 func nowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
+// uniqueStrings trims, deduplicates, and sorts a list of model IDs.
 func uniqueStrings(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	deduped := make([]string, 0, len(values))

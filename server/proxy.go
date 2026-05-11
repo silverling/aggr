@@ -22,17 +22,20 @@ const maxProxyBodyBytes = 32 << 20
 
 var errModelHintMissing = errors.New("model hint missing")
 
+// providerModelListResponse mirrors the upstream `/v1/models` payload.
 type providerModelListResponse struct {
 	Data []struct {
 		ID string `json:"id"`
 	} `json:"data"`
 }
 
+// openAIModelListResponse is the OpenAI-style aggregated models list returned by the gateway.
 type openAIModelListResponse struct {
 	Object string                `json:"object"`
 	Data   []openAIModelResponse `json:"data"`
 }
 
+// openAIModelResponse is one entry in the aggregated models list.
 type openAIModelResponse struct {
 	ID        string   `json:"id"`
 	Object    string   `json:"object"`
@@ -41,6 +44,7 @@ type openAIModelResponse struct {
 	Providers []string `json:"providers,omitempty"`
 }
 
+// normalizeBaseURL validates and canonicalizes a provider base URL before it is stored.
 func normalizeBaseURL(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", errors.New("base URL is required")
@@ -65,6 +69,7 @@ func normalizeBaseURL(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
+// resolveProviderPath strips any duplicated `/v1` prefix from the request path for a provider URL.
 func resolveProviderPath(baseURL, requestPath string) (string, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
@@ -84,6 +89,7 @@ func resolveProviderPath(baseURL, requestPath string) (string, error) {
 	return upstreamPath, nil
 }
 
+// ResolveProviderURL joins a provider base URL with a gateway request path and query string.
 func ResolveProviderURL(baseURL, requestPath string, rawQuery string) (string, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
@@ -109,6 +115,7 @@ func ResolveProviderURL(baseURL, requestPath string, rawQuery string) (string, e
 	return resolved.String(), nil
 }
 
+// newProviderClient creates an OpenAI SDK client configured for one provider and a specific HTTP transport.
 func (s *server) newProviderClient(provider providerRecord, httpClient *http.Client) openai.Client {
 	return openai.Client{
 		Options: []option.RequestOption{
@@ -120,6 +127,7 @@ func (s *server) newProviderClient(provider providerRecord, httpClient *http.Cli
 	}
 }
 
+// buildProviderRequestOptions copies inbound headers and query parameters into SDK request options.
 func buildProviderRequestOptions(headers http.Header, query url.Values) []option.RequestOption {
 	options := make([]option.RequestOption, 0, len(headers)+len(query))
 
@@ -143,6 +151,7 @@ func buildProviderRequestOptions(headers http.Header, query url.Values) []option
 	return options
 }
 
+// copyUpstreamResponse streams an upstream HTTP response to the caller and preserves headers.
 func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, providerName string, modelID string, logger *slog.Logger) {
 	defer response.Body.Close()
 
@@ -162,6 +171,7 @@ func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, provid
 	}
 }
 
+// ExtractModelHint finds the target model from the request path, query string, or JSON body.
 func ExtractModelHint(r *http.Request) (string, []byte, error) {
 	if strings.HasPrefix(r.URL.Path, "/v1/models/") {
 		modelID := strings.TrimPrefix(r.URL.Path, "/v1/models/")
@@ -197,6 +207,7 @@ func ExtractModelHint(r *http.Request) (string, []byte, error) {
 	return payload.Model, body, nil
 }
 
+// readRequestBody reads and bounds the inbound body so it can be reused for proxying.
 func readRequestBody(r *http.Request) ([]byte, error) {
 	if r.Body == nil {
 		return nil, nil
@@ -213,6 +224,7 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	return body, nil
 }
 
+// syncProviderCatalog refreshes one provider's model list using the OpenAI SDK.
 func (s *server) syncProviderCatalog(ctx context.Context, provider providerRecord) error {
 	path, err := resolveProviderPath(provider.BaseURL, "/v1/models")
 	if err != nil {
@@ -282,6 +294,7 @@ func (s *server) syncProviderCatalog(ctx context.Context, provider providerRecor
 	return nil
 }
 
+// syncAllProviders refreshes every enabled provider and returns the result set keyed by provider ID.
 func (s *server) syncAllProviders(ctx context.Context) map[int64]string {
 	results := make(map[int64]string)
 	providers, err := s.store.listProviders(ctx)
@@ -301,6 +314,7 @@ func (s *server) syncAllProviders(ctx context.Context) map[int64]string {
 	return results
 }
 
+// proxyOpenAIRequest forwards OpenAI-compatible traffic to the provider that serves the requested model.
 func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	modelID, body, err := ExtractModelHint(r)
 	if err != nil {
@@ -350,6 +364,7 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	copyUpstreamResponse(w, response, provider.Name, modelID, s.logger)
 }
 
+// toOpenAIModels converts the aggregated route table into the OpenAI models-list response shape.
 func toOpenAIModels(routeModels []routeModelView) openAIModelListResponse {
 	data := make([]openAIModelResponse, 0, len(routeModels))
 	for _, routeModel := range routeModels {
@@ -374,6 +389,7 @@ func toOpenAIModels(routeModels []routeModelView) openAIModelListResponse {
 	}
 }
 
+// copyResponseHeaders copies non-hop-by-hop headers from an upstream response.
 func copyResponseHeaders(dst, src http.Header) {
 	for key, values := range src {
 		if isHopByHopHeader(key) {
@@ -383,6 +399,7 @@ func copyResponseHeaders(dst, src http.Header) {
 	}
 }
 
+// isHopByHopHeader reports whether a header should be stripped when proxying responses.
 func isHopByHopHeader(name string) bool {
 	switch strings.ToLower(name) {
 	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
