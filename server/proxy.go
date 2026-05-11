@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -84,7 +84,7 @@ func resolveProviderPath(baseURL, requestPath string) (string, error) {
 	return upstreamPath, nil
 }
 
-func resolveProviderURL(baseURL, requestPath string, rawQuery string) (string, error) {
+func ResolveProviderURL(baseURL, requestPath string, rawQuery string) (string, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
 		return "", fmt.Errorf("parse provider URL: %w", err)
@@ -162,7 +162,7 @@ func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, provid
 	}
 }
 
-func extractModelHint(r *http.Request) (string, []byte, error) {
+func ExtractModelHint(r *http.Request) (string, []byte, error) {
 	if strings.HasPrefix(r.URL.Path, "/v1/models/") {
 		modelID := strings.TrimPrefix(r.URL.Path, "/v1/models/")
 		return modelID, nil, nil
@@ -302,7 +302,7 @@ func (s *server) syncAllProviders(ctx context.Context) map[int64]string {
 }
 
 func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
-	modelID, body, err := extractModelHint(r)
+	modelID, body, err := ExtractModelHint(r)
 	if err != nil {
 		if errors.Is(err, errModelHintMissing) {
 			writeError(w, http.StatusBadRequest, "requests under /v1 must include a model field or target /v1/models/{id}")

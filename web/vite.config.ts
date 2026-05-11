@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
 			},
 		},
 		build: {
-			outDir: resolve(__dirname, '../internal/webui/dist'),
+			outDir: resolve(__dirname, '../server/internal/webui/dist'),
 			emptyOutDir: true,
 		},
 	}

@@ -15,7 +15,7 @@
 ### Backend
 
 ```sh
-go run .
+go run ./server/cmd/aggr
 ```
 
 The server listens on `:8080` by default and stores data in `aggr.db`.
@@ -25,7 +25,7 @@ The server listens on `:8080` by default and stores data in `aggr.db`.
 Run the backend:
 
 ```sh
-AGGR_ENV=dev AGGR_WEB_DEV_URL=http://127.0.0.1:5173 go run .
+AGGR_ENV=dev AGGR_WEB_DEV_URL=http://127.0.0.1:5173 go run ./server/cmd/aggr
 ```
 
 Run the Vite dev server in a second terminal:
@@ -41,18 +41,19 @@ You can visit either:
 
 ### Production bundle
 
-Build the Web UI first:
+Use the repo build target so the embedded HTML is always regenerated before the Go binary is built:
+
+```sh
+make build
+```
+
+That runs `pnpm --dir web build` first and writes a single self-contained HTML file to `server/internal/webui/dist/index.html`, which is then embedded into the Go binary.
+
+If you want to run the steps manually, build the Web UI before any Go build:
 
 ```sh
 pnpm --dir web build
-```
-
-That writes a single self-contained HTML file to `internal/webui/dist/index.html`, which is embedded into the Go binary.
-
-Then build the server:
-
-```sh
-go build ./...
+go build ./server/cmd/aggr
 ```
 
 ## Environment variables

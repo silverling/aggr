@@ -1,10 +1,12 @@
-package main
+package server_test
 
 import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/silverling/aggr/server"
 )
 
 func TestResolveProviderURL(t *testing.T) {
@@ -43,12 +45,12 @@ func TestResolveProviderURL(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := resolveProviderURL(test.baseURL, test.path, test.rawQuery)
+			got, err := server.ResolveProviderURL(test.baseURL, test.path, test.rawQuery)
 			if err != nil {
-				t.Fatalf("resolveProviderURL() error = %v", err)
+				t.Fatalf("ResolveProviderURL() error = %v", err)
 			}
 			if got != test.wantURL {
-				t.Fatalf("resolveProviderURL() = %q, want %q", got, test.wantURL)
+				t.Fatalf("ResolveProviderURL() = %q, want %q", got, test.wantURL)
 			}
 		})
 	}
@@ -94,18 +96,18 @@ func TestExtractModelHint(t *testing.T) {
 				request.Header.Set("Content-Type", "application/json")
 			}
 
-			model, _, err := extractModelHint(request)
+			model, _, err := server.ExtractModelHint(request)
 			if test.wantErr {
 				if err == nil {
-					t.Fatalf("extractModelHint() expected error")
+					t.Fatalf("ExtractModelHint() expected error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("extractModelHint() error = %v", err)
+				t.Fatalf("ExtractModelHint() error = %v", err)
 			}
 			if model != test.wantModel {
-				t.Fatalf("extractModelHint() = %q, want %q", model, test.wantModel)
+				t.Fatalf("ExtractModelHint() = %q, want %q", model, test.wantModel)
 			}
 		})
 	}

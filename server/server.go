@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -10,12 +10,13 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-type config struct {
+type Config struct {
 	Addr         string
 	DatabasePath string
 	Environment  string
@@ -23,7 +24,7 @@ type config struct {
 }
 
 type server struct {
-	cfg         config
+	cfg         Config
 	logger      *slog.Logger
 	store       *store
 	syncClient  *http.Client
@@ -42,7 +43,7 @@ type syncAllResponse struct {
 	Results map[int64]string `json:"results"`
 }
 
-func newServer(cfg config, db *sql.DB, logger *slog.Logger) (*server, error) {
+func newServer(cfg Config, db *sql.DB, logger *slog.Logger) (*server, error) {
 	st := newStore(db)
 	if err := st.migrate(context.Background()); err != nil {
 		return nil, err
@@ -257,6 +258,69 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 
 func (s *server) handleProxyOpenAI(w http.ResponseWriter, r *http.Request) {
 	s.proxyOpenAIRequest(w, r)
+}
+
+func Run() error {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	cfg := loadConfig()
+
+	db, err := sql.Open("sqlite", cfg.DatabasePath)
+	if err != nil {
+		return fmt.Errorf("open sqlite database: %w", err)
+	}
+	defer db.Close()
+
+	db.SetMaxOpenConns(1)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
+	app, err := newServer(cfg, db, logger)
+	if err != nil {
+		return fmt.Errorf("initialize server: %w", err)
+	}
+
+	httpServer := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           app.routes(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	logger.Info("starting aggr",
+		"addr", cfg.Addr,
+		"db", cfg.DatabasePath,
+		"environment", cfg.Environment,
+		"web_dev_url", cfg.WebDevURL,
+	)
+
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("run http server: %w", err)
+	}
+
+	return nil
+}
+
+func loadConfig() Config {
+	environment := getenv("AGGR_ENV", "prod")
+	webDevURL := strings.TrimSpace(os.Getenv("AGGR_WEB_DEV_URL"))
+	if environment == "dev" && webDevURL == "" {
+		webDevURL = "http://127.0.0.1:5173"
+	}
+
+	return Config{
+		Addr:         getenv("AGGR_ADDR", ":8080"),
+		DatabasePath: getenv("AGGR_DB_PATH", "aggr.db"),
+		Environment:  environment,
+		WebDevURL:    webDevURL,
+	}
+}
+
+func getenv(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func (s *server) handleUI(w http.ResponseWriter, r *http.Request) {
