@@ -11,6 +11,7 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [vue(), tailwindcss(), viteSingleFile()],
+		publicDir: false,
 		server: {
 			host: '127.0.0.1',
 			port: Number(env.VITE_PORT || 5173),
