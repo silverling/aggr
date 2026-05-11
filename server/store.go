@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-var errProviderNotFound = errors.New("provider not found")
+var (
+	errProviderNotFound      = errors.New("provider not found")
+	errProviderModelNotFound = errors.New("provider does not serve model")
+)
 
 // providerRecord is the internal database representation of a configured provider.
 type providerRecord struct {
@@ -28,6 +31,8 @@ type providerRecord struct {
 	Enabled bool
 	// Models contains the synced model IDs currently associated with the provider.
 	Models []string
+	// DisabledModels contains the synced model IDs that are currently disabled for this provider.
+	DisabledModels []string
 	// LastError stores the most recent catalog sync error message, if any.
 	LastError string
 	// LastSyncedAt records when the provider catalog was last refreshed.
@@ -52,6 +57,8 @@ type providerView struct {
 	Enabled bool `json:"enabled"`
 	// Models lists the provider's synced model IDs.
 	Models []string `json:"models"`
+	// DisabledModels lists the synced model IDs currently blocked by disable rules.
+	DisabledModels []string `json:"disabledModels"`
 	// LastError exposes the most recent sync error, if one exists.
 	LastError string `json:"lastError,omitempty"`
 	// LastSyncedAt is the UTC timestamp of the last successful sync.
@@ -302,6 +309,14 @@ func (s *store) migrate(ctx context.Context) error {
 			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_models_model_id ON provider_models (model_id);`,
+		`CREATE TABLE IF NOT EXISTS provider_model_disable_rules (
+			provider_id INTEGER NOT NULL,
+			model_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY (provider_id, model_id),
+			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_provider_model_disable_rules_model_id ON provider_model_disable_rules (model_id, provider_id);`,
 		`CREATE TABLE IF NOT EXISTS proxy_request_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			provider_id INTEGER,
@@ -529,6 +544,13 @@ func (s *store) getProviderWithModels(ctx context.Context, id int64) (providerRe
 		return providerRecord{}, err
 	}
 	record.Models = models
+
+	disabledModels, err := s.listDisabledModelsForProvider(ctx, id)
+	if err != nil {
+		return providerRecord{}, err
+	}
+	record.DisabledModels = disabledModels
+
 	return record, nil
 }
 
@@ -596,6 +618,42 @@ func (s *store) deleteProvider(ctx context.Context, id int64) error {
 	}
 	if affected == 0 {
 		return errProviderNotFound
+	}
+
+	return nil
+}
+
+// setProviderModelDisabled creates or removes one provider/model disable rule.
+func (s *store) setProviderModelDisabled(ctx context.Context, providerID int64, modelID string, disabled bool) error {
+	if _, err := s.getProvider(ctx, providerID); err != nil {
+		return err
+	}
+
+	if disabled {
+		servesModel, err := s.providerServesModel(ctx, providerID, modelID)
+		if err != nil {
+			return err
+		}
+		if !servesModel {
+			return errProviderModelNotFound
+		}
+
+		if _, err := s.db.ExecContext(ctx, `
+			INSERT INTO provider_model_disable_rules (provider_id, model_id, created_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(provider_id, model_id) DO NOTHING
+		`, providerID, modelID, nowRFC3339()); err != nil {
+			return fmt.Errorf("insert provider model disable rule: %w", err)
+		}
+
+		return nil
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+		DELETE FROM provider_model_disable_rules
+		WHERE provider_id = ? AND model_id = ?
+	`, providerID, modelID); err != nil {
+		return fmt.Errorf("delete provider model disable rule: %w", err)
 	}
 
 	return nil
@@ -753,6 +811,17 @@ func (s *store) syncProviderModels(ctx context.Context, id int64, modelIDs []str
 	}
 
 	if _, err = tx.ExecContext(ctx, `
+		DELETE FROM provider_model_disable_rules
+		WHERE provider_id = ? AND model_id NOT IN (
+			SELECT model_id
+			FROM provider_models
+			WHERE provider_id = ?
+		)
+	`, id, id); err != nil {
+		return fmt.Errorf("clear stale provider model disable rules: %w", err)
+	}
+
+	if _, err = tx.ExecContext(ctx, `
 		UPDATE providers
 		SET last_error = NULL, last_synced_at = ?, updated_at = ?
 		WHERE id = ?
@@ -795,7 +864,8 @@ func (s *store) listRouteModels(ctx context.Context) ([]routeModelView, error) {
 		SELECT pm.model_id, p.id, p.name
 		FROM provider_models pm
 		INNER JOIN providers p ON p.id = pm.provider_id
-		WHERE p.enabled = 1
+		LEFT JOIN provider_model_disable_rules dr ON dr.provider_id = pm.provider_id AND dr.model_id = pm.model_id
+		WHERE p.enabled = 1 AND dr.provider_id IS NULL
 		ORDER BY pm.model_id ASC, p.name ASC, p.id ASC
 	`)
 	if err != nil {
@@ -842,7 +912,8 @@ func (s *store) findProviderForModel(ctx context.Context, modelID string) (provi
 		SELECT p.id, p.name, p.base_url, p.api_key, p.user_agent, p.enabled, p.last_error, p.last_synced_at, p.created_at, p.updated_at
 		FROM providers p
 		INNER JOIN provider_models pm ON pm.provider_id = p.id
-		WHERE p.enabled = 1 AND pm.model_id = ?
+		LEFT JOIN provider_model_disable_rules dr ON dr.provider_id = pm.provider_id AND dr.model_id = pm.model_id
+		WHERE p.enabled = 1 AND pm.model_id = ? AND dr.provider_id IS NULL
 		ORDER BY CASE WHEN p.last_synced_at IS NULL THEN 1 ELSE 0 END, p.last_synced_at DESC, p.id ASC
 		LIMIT 1
 	`, modelID)
@@ -859,23 +930,32 @@ func (s *store) findProviderForModel(ctx context.Context, modelID string) (provi
 	return record, nil
 }
 
-// attachModels populates the model lists for a batch of provider records.
+// attachModels populates the model lists and disabled-model lists for a batch
+// of provider records.
 func (s *store) attachModels(ctx context.Context, providers []providerRecord) error {
 	if len(providers) == 0 {
 		return nil
 	}
 
 	providerModels := make(map[int64][]string, len(providers))
+	providerDisabledModels := make(map[int64][]string, len(providers))
 	for _, provider := range providers {
 		models, err := s.listModelsForProvider(ctx, provider.ID)
 		if err != nil {
 			return err
 		}
 		providerModels[provider.ID] = models
+
+		disabledModels, err := s.listDisabledModelsForProvider(ctx, provider.ID)
+		if err != nil {
+			return err
+		}
+		providerDisabledModels[provider.ID] = disabledModels
 	}
 
 	for index := range providers {
 		providers[index].Models = providerModels[providers[index].ID]
+		providers[index].DisabledModels = providerDisabledModels[providers[index].ID]
 	}
 
 	return nil
@@ -908,6 +988,51 @@ func (s *store) listModelsForProvider(ctx context.Context, providerID int64) ([]
 	}
 
 	return models, nil
+}
+
+// listDisabledModelsForProvider returns the sorted model IDs blocked by
+// disable rules for one provider.
+func (s *store) listDisabledModelsForProvider(ctx context.Context, providerID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT model_id
+		FROM provider_model_disable_rules
+		WHERE provider_id = ?
+		ORDER BY model_id ASC
+	`, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("query provider model disable rules: %w", err)
+	}
+	defer rows.Close()
+
+	modelIDs := make([]string, 0)
+	for rows.Next() {
+		var modelID string
+		if err := rows.Scan(&modelID); err != nil {
+			return nil, fmt.Errorf("scan provider model disable rule: %w", err)
+		}
+		modelIDs = append(modelIDs, modelID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate provider model disable rules: %w", err)
+	}
+
+	return modelIDs, nil
+}
+
+// providerServesModel reports whether a provider currently has a synced mapping
+// for the requested model ID.
+func (s *store) providerServesModel(ctx context.Context, providerID int64, modelID string) (bool, error) {
+	var count int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM provider_models
+		WHERE provider_id = ? AND model_id = ?
+	`, providerID, modelID).Scan(&count); err != nil {
+		return false, fmt.Errorf("query provider model mapping: %w", err)
+	}
+
+	return count > 0, nil
 }
 
 // scanProxyRequestLog reads a proxy request audit row from either a query row or iterator.
@@ -1037,7 +1162,8 @@ func (p providerRecord) toView() providerView {
 		BaseURL:          p.BaseURL,
 		UserAgent:        p.UserAgent,
 		Enabled:          p.Enabled,
-		Models:           append([]string(nil), p.Models...),
+		Models:           append([]string{}, p.Models...),
+		DisabledModels:   append([]string{}, p.DisabledModels...),
 		LastError:        p.LastError,
 		APIKeyConfigured: p.APIKey != "",
 		APIKeyPreview:    maskAPIKey(p.APIKey),

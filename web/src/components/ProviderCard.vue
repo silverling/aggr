@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import type { ProviderView } from '../types'
+import type { ModelDisableRuleSelection, ProviderView } from '../types'
 
 const props = defineProps<{
 	provider: ProviderView
 	syncing: boolean
+	selectedRule: ModelDisableRuleSelection | null
 }>()
 
 const emit = defineEmits<{
 	(e: 'edit'): void
 	(e: 'sync'): void
 	(e: 'delete'): void
+	(e: 'select-rule', modelId: string): void
 }>()
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -28,6 +30,14 @@ function formatTimestamp(value?: string) {
 	}
 
 	return dateFormatter.format(parsed)
+}
+
+function isModelDisabled(modelId: string) {
+	return props.provider.disabledModels.includes(modelId)
+}
+
+function isSelected(modelId: string) {
+	return props.selectedRule?.providerId === props.provider.id && props.selectedRule.modelId === modelId
 }
 </script>
 
@@ -61,13 +71,23 @@ function formatTimestamp(value?: string) {
 		</p>
 
 		<div v-if="props.provider.models.length > 0" class="flex flex-wrap gap-2.5">
-			<span
+			<button
 				v-for="model in props.provider.models"
 				:key="model"
-				class="inline-flex items-center rounded-full border border-accent-soft bg-[rgba(12,118,98,0.08)] px-3 py-2 font-mono text-[0.82rem] font-bold text-accent"
+				data-anchor="provider-card-model"
+				:class="[
+					'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
+					isSelected(model)
+						? 'border-[rgba(24,34,47,0.24)] bg-[rgba(24,34,47,0.12)] text-ink-strong shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+						: isModelDisabled(model)
+							? 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger'
+							: 'border-accent-soft bg-[rgba(12,118,98,0.08)] text-accent',
+				]"
+				type="button"
+				@click="emit('select-rule', model)"
 			>
 				{{ model }}
-			</span>
+			</button>
 		</div>
 		<p v-else class="text-ink-soft">No models synced yet.</p>
 

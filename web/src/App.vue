@@ -7,6 +7,7 @@ import RequestLogCard from './components/RequestLogCard.vue'
 import StatCard from './components/StatCard.vue'
 import type {
 	DeleteProxyRequestsPayload,
+	ModelDisableRuleSelection,
 	ModelRoute,
 	ModelsPayload,
 	NoticeTone,
@@ -14,6 +15,7 @@ import type {
 	ProvidersPayload,
 	ProxyRequestLogView,
 	ProxyRequestsPayload,
+	SetModelDisableRulePayload,
 } from './types'
 
 const providers = ref<ProviderView[]>([])
@@ -24,8 +26,10 @@ const saving = ref(false)
 const syncingAll = ref(false)
 const syncingProviderId = ref<number | null>(null)
 const editingProviderId = ref<number | null>(null)
+const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
 const notice = ref<{ tone: NoticeTone; text: string } | null>(null)
+const selectedModelDisableRule = ref<ModelDisableRuleSelection | null>(null)
 const requestLogLimit = 40
 
 const form = reactive({
@@ -49,6 +53,38 @@ const modelCount = computed(() => models.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
 const isEditing = computed(() => editingProviderId.value !== null)
+const activeModelDisableRules = computed(() =>
+	providers.value
+		.flatMap((provider) =>
+			provider.disabledModels.map((modelId) => ({
+				providerId: provider.id,
+				providerName: provider.name,
+				modelId,
+			})),
+		)
+		.sort((left, right) => {
+			if (left.providerName === right.providerName) {
+				return left.modelId.localeCompare(right.modelId)
+			}
+			return left.providerName.localeCompare(right.providerName)
+		}),
+)
+const selectedModelDisableRuleProvider = computed(() => {
+	if (selectedModelDisableRule.value === null) {
+		return null
+	}
+
+	return providers.value.find((provider) => provider.id === selectedModelDisableRule.value?.providerId) ?? null
+})
+const selectedModelDisableRuleExists = computed(() => {
+	const selection = selectedModelDisableRule.value
+	const provider = selectedModelDisableRuleProvider.value
+	if (selection === null || provider === null) {
+		return false
+	}
+
+	return provider.disabledModels.includes(selection.modelId)
+})
 const featuredModel = computed(() => models.value[0]?.id ?? 'gpt-4.1')
 const curlExample = computed(() =>
 	[
@@ -69,6 +105,25 @@ function setNotice(tone: NoticeTone, text: string) {
 
 function clearNotice() {
 	notice.value = null
+}
+
+function reconcileSelectedModelDisableRule() {
+	const selection = selectedModelDisableRule.value
+	if (selection === null) {
+		return
+	}
+
+	const provider = providers.value.find((candidate) => candidate.id === selection.providerId)
+	if (provider === undefined || !provider.models.includes(selection.modelId)) {
+		selectedModelDisableRule.value = null
+		return
+	}
+
+	selectedModelDisableRule.value = {
+		providerId: provider.id,
+		providerName: provider.name,
+		modelId: selection.modelId,
+	}
 }
 
 function resetForm() {
@@ -106,6 +161,7 @@ async function loadDashboard(showNotice = false) {
 		providers.value = providerPayload.providers
 		models.value = modelPayload.models
 		requestLogs.value = requestPayload.requests
+		reconcileSelectedModelDisableRule()
 
 		if (showNotice) {
 			setNotice('info', 'Dashboard refreshed.')
@@ -194,6 +250,15 @@ async function syncAll() {
 	}
 }
 
+function selectModelDisableRule(provider: Pick<ProviderView, 'id' | 'name'>, modelId: string) {
+	selectedModelDisableRule.value = {
+		providerId: provider.id,
+		providerName: provider.name,
+		modelId,
+	}
+	clearNotice()
+}
+
 async function removeProvider(provider: ProviderView) {
 	if (!window.confirm(`Delete provider "${provider.name}"?`)) {
 		return
@@ -215,6 +280,10 @@ async function removeProvider(provider: ProviderView) {
 	} catch (error) {
 		setNotice('error', error instanceof Error ? error.message : `Failed to delete ${provider.name}.`)
 	}
+}
+
+function clearSelectedModelDisableRule() {
+	selectedModelDisableRule.value = null
 }
 
 function resetRequestLogFilters() {
@@ -242,6 +311,44 @@ async function copyGatewayBase() {
 		setNotice('success', 'Gateway base copied to the clipboard.')
 	} catch {
 		setNotice('error', 'Clipboard access is unavailable in this browser.')
+	}
+}
+
+async function applyModelDisableRule() {
+	const selection = selectedModelDisableRule.value
+	const provider = selectedModelDisableRuleProvider.value
+	if (selection === null || provider === null) {
+		return
+	}
+
+	applyingModelDisableRule.value = true
+	clearNotice()
+
+	const nextDisabled = !selectedModelDisableRuleExists.value
+
+	try {
+		await request<SetModelDisableRulePayload>('/api/model-disable-rules', {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				providerId: selection.providerId,
+				modelId: selection.modelId,
+				disabled: nextDisabled,
+			}),
+		})
+		await loadDashboard()
+		setNotice(
+			'success',
+			nextDisabled
+				? `Disabled ${selection.modelId} for ${selection.providerName}.`
+				: `Re-enabled ${selection.modelId} for ${selection.providerName}.`,
+		)
+	} catch (error) {
+		setNotice('error', error instanceof Error ? error.message : 'Failed to update the model disable rule.')
+	} finally {
+		applyingModelDisableRule.value = false
 	}
 }
 
@@ -447,6 +554,115 @@ onMounted(() => {
 		</section>
 
 		<section
+			data-anchor="model-disable-rules"
+			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+		>
+			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+				<div>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model disable rules</p>
+					<h2>Block one provider for one model</h2>
+				</div>
+				<span class="text-ink-soft">{{ activeModelDisableRules.length }} active rule{{ activeModelDisableRules.length === 1 ? '' : 's' }}</span>
+			</div>
+
+			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+				<article data-anchor="model-disable-rule-pending" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+					<div>
+						<h3>Pending change</h3>
+						<p class="mt-1.5 leading-[1.6] text-ink-soft">
+							Click a provider chip in a model card or a model chip in a provider card, then apply the rule to disable or re-enable that
+							specific route.
+						</p>
+					</div>
+
+					<div v-if="selectedModelDisableRule" class="flex flex-wrap items-center gap-2.5">
+						<span
+							class="inline-flex items-center rounded-full border border-line bg-white/70 px-3 py-2 font-mono text-[0.82rem] font-bold text-ink-strong"
+						>
+							{{ selectedModelDisableRule.providerName }}
+						</span>
+						<span class="text-sm text-ink-soft">for</span>
+						<span
+							class="inline-flex items-center rounded-full border border-line bg-white/70 px-3 py-2 font-mono text-[0.82rem] font-bold text-ink-strong"
+						>
+							{{ selectedModelDisableRule.modelId }}
+						</span>
+					</div>
+					<p v-else class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft">
+						No provider/model pair is selected yet.
+					</p>
+
+					<p
+						v-if="selectedModelDisableRule"
+						:class="[
+							'rounded-[16px] px-3.5 py-3 leading-[1.6]',
+							selectedModelDisableRuleExists ? 'bg-danger-soft text-danger' : 'bg-[rgba(12,118,98,0.08)] text-accent',
+						]"
+					>
+						{{
+							selectedModelDisableRuleExists
+								? 'This provider is currently disabled for the selected model.'
+								: 'This provider currently participates in routing for the selected model.'
+						}}
+					</p>
+
+					<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+						<button
+							class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+							type="button"
+							:disabled="selectedModelDisableRule === null || applyingModelDisableRule"
+							@click="applyModelDisableRule"
+						>
+							{{ applyingModelDisableRule ? 'Applying…' : selectedModelDisableRuleExists ? 'Remove disable rule' : 'Apply disable rule' }}
+						</button>
+						<button
+							class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+							type="button"
+							:disabled="selectedModelDisableRule === null"
+							@click="clearSelectedModelDisableRule"
+						>
+							Clear selection
+						</button>
+					</div>
+				</article>
+
+				<article data-anchor="model-disable-rule-active" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+					<div>
+						<h3>Current rules</h3>
+						<p class="mt-1.5 leading-[1.6] text-ink-soft">
+							Disabled routes stay out of `/v1/models` and proxy selection until you remove the rule.
+						</p>
+					</div>
+
+					<p
+						v-if="activeModelDisableRules.length === 0"
+						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+					>
+						No provider/model pairs are disabled right now.
+					</p>
+
+					<div v-else class="flex flex-wrap gap-2.5">
+						<button
+							v-for="rule in activeModelDisableRules"
+							:key="`${rule.providerId}:${rule.modelId}`"
+							data-anchor="model-disable-rule-chip"
+							:class="[
+								'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
+								selectedModelDisableRule?.providerId === rule.providerId && selectedModelDisableRule?.modelId === rule.modelId
+									? 'border-[rgba(24,34,47,0.24)] bg-[rgba(24,34,47,0.12)] text-ink-strong shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+									: 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger',
+							]"
+							type="button"
+							@click="selectModelDisableRule({ id: rule.providerId, name: rule.providerName }, rule.modelId)"
+						>
+							{{ rule.providerName }} · {{ rule.modelId }}
+						</button>
+					</div>
+				</article>
+			</div>
+		</section>
+
+		<section
 			data-anchor="providers"
 			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 		>
@@ -471,8 +687,10 @@ onMounted(() => {
 					:key="provider.id"
 					:provider="provider"
 					:syncing="syncingProviderId === provider.id"
+					:selected-rule="selectedModelDisableRule"
 					@edit="beginEdit(provider)"
 					@sync="syncProvider(provider)"
+					@select-rule="selectModelDisableRule(provider, $event)"
 					@delete="removeProvider(provider)"
 				/>
 			</div>
@@ -498,7 +716,13 @@ onMounted(() => {
 			</div>
 
 			<div v-else class="grid gap-[18px] lg:grid-cols-3">
-				<ModelCard v-for="model in models" :key="model.id" :model="model" />
+				<ModelCard
+					v-for="model in models"
+					:key="model.id"
+					:model="model"
+					:selected-rule="selectedModelDisableRule"
+					@select-rule="selectModelDisableRule($event, model.id)"
+				/>
 			</div>
 		</section>
 

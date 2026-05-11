@@ -7,6 +7,7 @@ export interface ProviderView {
 	userAgent?: string
 	enabled: boolean
 	models: string[]
+	disabledModels: string[]
 	lastError?: string
 	lastSyncedAt?: string
 	apiKeyConfigured: boolean
@@ -21,6 +22,12 @@ export interface ModelProviderSummary {
 export interface ModelRoute {
 	id: string
 	providers: ModelProviderSummary[]
+}
+
+export interface ModelDisableRuleSelection {
+	providerId: number
+	providerName: string
+	modelId: string
 }
 
 export interface ProvidersPayload {
@@ -75,4 +82,10 @@ export interface ProxyRequestsPayload {
 
 export interface DeleteProxyRequestsPayload {
 	deleted: number
+}
+
+export interface SetModelDisableRulePayload {
+	providerId: number
+	modelId: string
+	disabled: boolean
 }

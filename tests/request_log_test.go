@@ -28,8 +28,14 @@ type testProviderCreateResponse struct {
 type testProviderView struct {
 	// ID is the database identifier assigned by the server.
 	ID int64 `json:"id"`
+	// Name is the display label returned by the admin API.
+	Name string `json:"name,omitempty"`
 	// UserAgent is the optional upstream user-agent string stored for the provider.
 	UserAgent string `json:"userAgent,omitempty"`
+	// Models lists the provider's synced models.
+	Models []string `json:"models,omitempty"`
+	// DisabledModels lists the synced models currently blocked by disable rules.
+	DisabledModels []string `json:"disabledModels,omitempty"`
 }
 
 // testProxyRequestsResponse mirrors the recent request-log list payload.
@@ -320,13 +326,21 @@ func newTestGatewayServer(t *testing.T) string {
 func createTestProvider(t *testing.T, gatewayURL string, baseURL string, userAgent string) testProviderView {
 	t.Helper()
 
+	return createNamedTestProvider(t, gatewayURL, "Primary", baseURL, userAgent)
+}
+
+// createNamedTestProvider inserts a named provider through the public admin API
+// so integration tests can target multiple distinct upstreams.
+func createNamedTestProvider(t *testing.T, gatewayURL string, name string, baseURL string, userAgent string) testProviderView {
+	t.Helper()
+
 	var payload testProviderCreateResponse
 	doJSONRequest(
 		t,
 		http.DefaultClient,
 		http.MethodPost,
 		gatewayURL+"/api/providers",
-		`{"name":"Primary","baseUrl":"`+baseURL+`","apiKey":"test-key","userAgent":"`+userAgent+`","enabled":true}`,
+		`{"name":"`+name+`","baseUrl":"`+baseURL+`","apiKey":"test-key","userAgent":"`+userAgent+`","enabled":true}`,
 		http.StatusCreated,
 		&payload,
 	)
@@ -336,6 +350,9 @@ func createTestProvider(t *testing.T, gatewayURL string, baseURL string, userAge
 	}
 	if payload.Provider.UserAgent != userAgent {
 		t.Fatalf("provider user agent = %q, want %q", payload.Provider.UserAgent, userAgent)
+	}
+	if payload.Provider.Name != name {
+		t.Fatalf("provider name = %q, want %q", payload.Provider.Name, name)
 	}
 
 	return payload.Provider

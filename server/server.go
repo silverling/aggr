@@ -56,6 +56,17 @@ type providerPayload struct {
 	Enabled *bool `json:"enabled"`
 }
 
+// modelDisableRulePayload is the JSON body accepted by the provider/model
+// disable-rule API.
+type modelDisableRulePayload struct {
+	// ProviderID identifies the provider affected by the rule.
+	ProviderID int64 `json:"providerId"`
+	// ModelID identifies the synced model affected by the rule.
+	ModelID string `json:"modelId"`
+	// Disabled reports whether the rule should exist after the request completes.
+	Disabled bool `json:"disabled"`
+}
+
 // syncAllResponse reports the per-provider result of a bulk model catalog sync.
 type syncAllResponse struct {
 	Results map[int64]string `json:"results"`
@@ -116,6 +127,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/providers/{id}/sync", s.handleSyncProvider)
 	mux.HandleFunc("POST /api/providers/sync", s.handleSyncAllProviders)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
+	mux.HandleFunc("PUT /api/model-disable-rules", s.handleSetModelDisableRule)
 	mux.HandleFunc("GET /api/requests", s.handleListProxyRequests)
 	mux.HandleFunc("DELETE /api/requests", s.handleDeleteProxyRequests)
 	mux.HandleFunc("GET /v1/models", s.handleListOpenAIModels)
@@ -286,6 +298,29 @@ func (s *server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"models": models,
 	})
+}
+
+// handleSetModelDisableRule creates or removes one provider/model disable rule.
+func (s *server) handleSetModelDisableRule(w http.ResponseWriter, r *http.Request) {
+	payload, err := decodeModelDisableRulePayload(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.store.setProviderModelDisabled(r.Context(), payload.ProviderID, payload.ModelID, payload.Disabled); err != nil {
+		switch {
+		case errors.Is(err, errProviderNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, errProviderModelNotFound):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // handleListProxyRequests returns the recent OpenAI gateway request audit log.
@@ -484,6 +519,26 @@ func decodeProviderPayload(r *http.Request, allowEmptyAPIKey bool) (providerMuta
 		return providerMutation{}, fmt.Errorf("decode provider payload: %w", err)
 	}
 	return payload.validate(allowEmptyAPIKey)
+}
+
+// decodeModelDisableRulePayload parses and validates the provider/model
+// disable-rule request body.
+func decodeModelDisableRulePayload(r *http.Request) (modelDisableRulePayload, error) {
+	var payload modelDisableRulePayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		return modelDisableRulePayload{}, fmt.Errorf("decode model disable rule payload: %w", err)
+	}
+
+	if payload.ProviderID <= 0 {
+		return modelDisableRulePayload{}, errors.New("providerId must be a positive integer")
+	}
+
+	payload.ModelID = strings.TrimSpace(payload.ModelID)
+	if payload.ModelID == "" {
+		return modelDisableRulePayload{}, errors.New("modelId is required")
+	}
+
+	return payload, nil
 }
 
 // decodeProviderPayloadForUpdate parses update payloads and reports whether the API key should be preserved.
