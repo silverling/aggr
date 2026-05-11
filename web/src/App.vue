@@ -206,27 +206,40 @@ onMounted(() => {
 </script>
 
 <template>
-	<div class="shell">
-		<header class="hero panel">
-			<div class="hero-copy">
-				<p class="eyebrow">Unified gateway</p>
+	<div data-anchor="dashboard" class="mx-auto grid w-[min(1240px,calc(100vw-32px))] gap-[22px] py-8 max-lg:w-[calc(100vw-24px)] max-lg:py-4">
+		<header
+			data-anchor="hero"
+			class="grid gap-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-[34px]"
+		>
+			<div class="max-w-[760px]">
+				<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Unified gateway</p>
 				<h1>Aggr</h1>
-				<p class="lede">
+				<p class="mt-4 max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">
 					Store provider credentials in SQLite, discover their model catalogs, and proxy each request to the provider that actually serves the
 					requested model.
 				</p>
 			</div>
 
-			<div class="hero-actions">
-				<button class="button button-subtle" type="button" :disabled="loading" @click="loadDashboard(true)">
+			<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+				<button
+					class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+					type="button"
+					:disabled="loading"
+					@click="loadDashboard(true)"
+				>
 					{{ loading ? 'Refreshing…' : 'Refresh dashboard' }}
 				</button>
-				<button class="button button-primary" type="button" :disabled="syncingAll" @click="syncAll">
+				<button
+					class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+					type="button"
+					:disabled="syncingAll"
+					@click="syncAll"
+				>
 					{{ syncingAll ? 'Syncing catalogs…' : 'Sync all providers' }}
 				</button>
 			</div>
 
-			<div class="stats-grid">
+			<div class="grid gap-[18px] md:grid-cols-3">
 				<StatCard label="Providers" :value="providerCount" :description="`${enabledProviderCount} enabled for routing`" />
 				<StatCard label="Models" :value="modelCount" description="From synced `/v1/models` catalogs" />
 				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
@@ -235,85 +248,124 @@ onMounted(() => {
 
 		<NoticeBanner v-if="notice" :tone="notice.tone" :text="notice.text" />
 
-		<section class="top-grid">
-			<article class="panel">
-				<div class="section-head">
+		<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+			<article
+				data-anchor="provider-config"
+				class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+			>
+				<div class="mb-5 flex items-start justify-between gap-3">
 					<div>
-						<p class="eyebrow">Provider config</p>
+						<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Provider config</p>
 						<h2>{{ isEditing ? 'Update an upstream provider' : 'Add an upstream provider' }}</h2>
 					</div>
-					<button v-if="isEditing" class="text-button" type="button" @click="resetForm">Cancel edit</button>
+					<button v-if="isEditing" class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="resetForm">
+						Cancel edit
+					</button>
 				</div>
 
-				<form class="provider-form" @submit.prevent="submitProvider">
-					<label>
-						<span>Display name</span>
-						<input v-model.trim="form.name" type="text" autocomplete="off" placeholder="OpenAI primary" required />
+				<form class="grid gap-4" @submit.prevent="submitProvider">
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">Display name</span>
+						<input
+							v-model.trim="form.name"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							type="text"
+							autocomplete="off"
+							placeholder="OpenAI primary"
+							required
+						/>
 					</label>
 
-					<label>
-						<span>Base URL</span>
-						<input v-model.trim="form.baseUrl" type="url" autocomplete="off" placeholder="https://api.openai.com/v1" required />
-						<small>Use the provider&apos;s OpenAI-compatible API root.</small>
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">Base URL</span>
+						<input
+							v-model.trim="form.baseUrl"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							type="url"
+							autocomplete="off"
+							placeholder="https://api.openai.com/v1"
+							required
+						/>
+						<small class="text-ink-soft">Use the provider&apos;s OpenAI-compatible API root.</small>
 					</label>
 
-					<label>
-						<span>API key</span>
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">API key</span>
 						<input
 							v-model.trim="form.apiKey"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 							type="password"
 							:placeholder="isEditing ? 'Leave blank to keep the current key' : 'sk-...'"
 							:required="!isEditing"
 						/>
 					</label>
 
-					<label class="checkbox">
-						<input v-model="form.enabled" type="checkbox" />
-						<span>Enabled for model routing</span>
+					<label class="flex items-center justify-start gap-3 rounded-[var(--radius-field)] border border-line bg-surface-muted px-4 py-[14px]">
+						<input v-model="form.enabled" class="h-[18px] w-[18px] accent-accent" type="checkbox" />
+						<span class="font-bold text-ink-strong">Enabled for model routing</span>
 					</label>
 
-					<button class="button button-primary" type="submit" :disabled="saving">
+					<button
+						class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+						type="submit"
+						:disabled="saving"
+					>
 						{{ saving ? 'Saving…' : isEditing ? 'Update provider' : 'Create provider' }}
 					</button>
 				</form>
 			</article>
 
-			<article class="panel">
-				<div class="section-head">
+			<article
+				data-anchor="quick-start"
+				class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+			>
+				<div class="mb-5 flex items-start justify-between gap-3">
 					<div>
-						<p class="eyebrow">Quick start</p>
+						<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Quick start</p>
 						<h2>Point clients at the gateway</h2>
 					</div>
-					<button class="text-button" type="button" @click="copyGatewayBase">Copy base URL</button>
+					<button class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="copyGatewayBase">Copy base URL</button>
 				</div>
 
-				<div class="endpoint-card">
-					<span class="endpoint-label">Gateway base</span>
-					<code>{{ gatewayBase }}</code>
+				<div
+					class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] border border-line bg-surface-strong p-[18px]"
+				>
+					<span class="text-[0.82rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Gateway base</span>
+					<code class="break-words text-ink-strong">{{ gatewayBase }}</code>
 				</div>
 
-				<pre class="snippet"><code>{{ curlExample }}</code></pre>
+				<pre
+					class="m-0 overflow-auto rounded-[var(--radius-card)] border border-line bg-[linear-gradient(180deg,rgba(14,32,41,0.96),rgba(14,32,41,0.88)),radial-gradient(circle_at_top_left,rgba(12,118,98,0.28),transparent_55%)] p-[18px] text-[#dff7f1]"
+				><code class="whitespace-pre-wrap break-words text-[0.92rem] leading-[1.75]">{{ curlExample }}</code></pre>
 
-				<ul class="tips">
-					<li>`GET /v1/models` returns the aggregated model catalog.</li>
-					<li>Requests are routed strictly by the `model` field in the JSON payload.</li>
+				<ul class="mt-4 grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
+					<li><code class="font-mono text-ink-strong">GET /v1/models</code> returns the aggregated model catalog.</li>
+					<li>Requests are routed strictly by the <code class="font-mono text-ink-strong">model</code> field in the JSON payload.</li>
 					<li>Providers sync automatically after create or update, and you can resync at any time.</li>
 				</ul>
 			</article>
 		</section>
 
-		<section class="panel panel-body">
-			<div class="section-head">
+		<section
+			data-anchor="providers"
+			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+		>
+			<div class="mb-5 flex items-start justify-between gap-3">
 				<div>
-					<p class="eyebrow">Providers</p>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Providers</p>
 					<h2>Routing inventory</h2>
 				</div>
-				<span class="section-meta">{{ enabledProviderCount }} active / {{ providerCount }} total</span>
+				<span class="text-ink-soft">{{ enabledProviderCount }} active / {{ providerCount }} total</span>
 			</div>
 
-			<div v-if="providers.length === 0" class="empty-state">Add a provider above to start discovering models and proxying requests.</div>
+			<div
+				v-if="providers.length === 0"
+				class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
+			>
+				Add a provider above to start discovering models and proxying requests.
+			</div>
 
-			<div v-else class="provider-grid">
+			<div v-else class="grid gap-[18px] lg:grid-cols-2">
 				<ProviderCard
 					v-for="provider in providers"
 					:key="provider.id"
@@ -326,18 +378,26 @@ onMounted(() => {
 			</div>
 		</section>
 
-		<section class="panel panel-body">
-			<div class="section-head">
+		<section
+			data-anchor="models"
+			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+		>
+			<div class="mb-5 flex items-start justify-between gap-3">
 				<div>
-					<p class="eyebrow">Model catalog</p>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model catalog</p>
 					<h2>Aggregated routing table</h2>
 				</div>
-				<span class="section-meta">{{ modelCount }} routable models</span>
+				<span class="text-ink-soft">{{ modelCount }} routable models</span>
 			</div>
 
-			<div v-if="models.length === 0" class="empty-state">Sync at least one provider catalog to populate the gateway&apos;s model routes.</div>
+			<div
+				v-if="models.length === 0"
+				class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
+			>
+				Sync at least one provider catalog to populate the gateway&apos;s model routes.
+			</div>
 
-			<div v-else class="model-grid">
+			<div v-else class="grid gap-[18px] lg:grid-cols-3">
 				<ModelCard v-for="model in models" :key="model.id" :model="model" />
 			</div>
 		</section>
