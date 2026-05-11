@@ -24,6 +24,18 @@ export interface ModelRoute {
 	providers: ModelProviderSummary[]
 }
 
+export interface ModelAliasView {
+	id: number
+	aliasModelId: string
+	targetModelId: string
+	targetProviderId?: number
+	targetProviderName?: string
+	providers: ModelProviderSummary[]
+	routable: boolean
+	createdAt: string
+	updatedAt: string
+}
+
 export interface ModelDisableRuleSelection {
 	providerId: number
 	providerName: string
@@ -36,6 +48,10 @@ export interface ProvidersPayload {
 
 export interface ModelsPayload {
 	models: ModelRoute[]
+}
+
+export interface ModelAliasesPayload {
+	aliases: ModelAliasView[]
 }
 
 export interface ProxyRequestLogView {

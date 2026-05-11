@@ -44,6 +44,18 @@ type openAIModelResponse struct {
 	Providers []string `json:"providers,omitempty"`
 }
 
+// resolvedModelRoute captures the public model requested by the client, the
+// upstream model that should actually be sent, and the provider selected to
+// handle the request.
+type resolvedModelRoute struct {
+	// RequestedModelID is the public model name from the inbound client request.
+	RequestedModelID string
+	// UpstreamModelID is the model name that should be sent to the upstream provider.
+	UpstreamModelID string
+	// Provider is the enabled provider selected to handle the request.
+	Provider providerRecord
+}
+
 // flushingWriter wraps a response writer so long-lived streamed responses flush
 // after each copied chunk reaches the caller.
 type flushingWriter struct {
@@ -270,7 +282,7 @@ func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, provid
 // ExtractModelHint finds the target model from the request path, query string, or JSON body.
 func ExtractModelHint(r *http.Request) (string, []byte, error) {
 	if strings.HasPrefix(r.URL.Path, "/v1/models/") {
-		modelID := strings.TrimPrefix(r.URL.Path, "/v1/models/")
+		modelID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/models/"))
 		return modelID, nil, nil
 	}
 
@@ -300,7 +312,127 @@ func ExtractModelHint(r *http.Request) (string, []byte, error) {
 		return "", body, errModelHintMissing
 	}
 
-	return payload.Model, body, nil
+	return strings.TrimSpace(payload.Model), body, nil
+}
+
+// resolveModelRoute resolves a public model name into the provider and
+// upstream model that should actually be used for proxying.
+func (s *server) resolveModelRoute(ctx context.Context, requestedModelID string) (resolvedModelRoute, error) {
+	alias, err := s.store.getModelAliasByName(ctx, requestedModelID)
+	if err == nil {
+		var provider providerRecord
+		if alias.TargetProviderID.Valid {
+			provider, err = s.store.getRoutableProviderForModel(ctx, alias.TargetProviderID.Int64, alias.TargetModelID)
+		} else {
+			provider, err = s.store.findProviderForModel(ctx, alias.TargetModelID)
+		}
+		if err != nil {
+			return resolvedModelRoute{}, err
+		}
+
+		return resolvedModelRoute{
+			RequestedModelID: requestedModelID,
+			UpstreamModelID:  alias.TargetModelID,
+			Provider:         provider,
+		}, nil
+	}
+	if !errors.Is(err, errModelAliasNotFound) {
+		return resolvedModelRoute{}, err
+	}
+
+	provider, err := s.store.findProviderForModel(ctx, requestedModelID)
+	if err != nil {
+		return resolvedModelRoute{}, err
+	}
+
+	return resolvedModelRoute{
+		RequestedModelID: requestedModelID,
+		UpstreamModelID:  requestedModelID,
+		Provider:         provider,
+	}, nil
+}
+
+// rewriteModelRequest prepares the upstream path, query string, and JSON body
+// so alias requests are translated into the configured target model.
+func rewriteModelRequest(r *http.Request, body []byte, requestedModelID string, upstreamModelID string) (string, url.Values, []byte, error) {
+	path := rewriteModelPath(r.URL.Path, requestedModelID, upstreamModelID)
+	query := cloneQueryValues(r.URL.Query())
+	if query.Has("model") {
+		query.Set("model", upstreamModelID)
+	}
+
+	rewrittenBody, err := rewriteJSONModelField(body, upstreamModelID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	return path, query, rewrittenBody, nil
+}
+
+// rewriteModelPath replaces the first model segment in `/v1/models/{id}` style
+// paths so model aliases can target an upstream model name.
+func rewriteModelPath(path string, requestedModelID string, upstreamModelID string) string {
+	if requestedModelID == upstreamModelID {
+		return path
+	}
+
+	const modelPathPrefix = "/v1/models/"
+	if !strings.HasPrefix(path, modelPathPrefix) {
+		return path
+	}
+
+	suffix := strings.TrimPrefix(path, modelPathPrefix)
+	parts := strings.SplitN(suffix, "/", 2)
+	if len(parts) == 0 || parts[0] != requestedModelID {
+		return path
+	}
+
+	rewritten := modelPathPrefix + upstreamModelID
+	if len(parts) == 2 && parts[1] != "" {
+		rewritten += "/" + parts[1]
+	}
+
+	return rewritten
+}
+
+// rewriteJSONModelField replaces the top-level `model` field in a JSON object
+// body when the gateway needs to proxy an alias request to another model name.
+func rewriteJSONModelField(body []byte, upstreamModelID string) ([]byte, error) {
+	if len(body) == 0 {
+		return nil, nil
+	}
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return append([]byte(nil), body...), nil
+	}
+
+	if _, found := payload["model"]; !found {
+		return append([]byte(nil), body...), nil
+	}
+
+	modelJSON, err := json.Marshal(upstreamModelID)
+	if err != nil {
+		return nil, fmt.Errorf("encode rewritten model field: %w", err)
+	}
+	payload["model"] = modelJSON
+
+	rewrittenBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode rewritten request body: %w", err)
+	}
+
+	return rewrittenBody, nil
+}
+
+// cloneQueryValues copies a query map so alias rewrites do not mutate the
+// original request URL owned by the server.
+func cloneQueryValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, items := range values {
+		cloned[key] = append([]string(nil), items...)
+	}
+	return cloned
 }
 
 // readRequestBody reads and bounds the inbound body so it can be reused for proxying.
@@ -415,8 +547,8 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	auditContext := context.WithoutCancel(r.Context())
 
-	modelID, body, err := ExtractModelHint(r)
-	logID := s.createProxyRequestAudit(auditContext, r, modelID, body)
+	requestedModelID, body, err := ExtractModelHint(r)
+	logID := s.createProxyRequestAudit(auditContext, r, requestedModelID, body)
 	if err != nil {
 		if errors.Is(err, errModelHintMissing) {
 			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusBadRequest, "requests under /v1 must include a model field or target /v1/models/{id}")
@@ -426,19 +558,25 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider, err := s.store.findProviderForModel(r.Context(), modelID)
+	route, err := s.resolveModelRoute(r.Context(), requestedModelID)
 	if err != nil {
 		if errors.Is(err, errProviderNotFound) {
-			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusNotFound, fmt.Sprintf("no enabled provider serves model %q", modelID))
+			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusNotFound, fmt.Sprintf("no enabled provider serves model %q", requestedModelID))
 			return
 		}
 		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	path, err := resolveProviderPath(provider.BaseURL, r.URL.Path)
+	upstreamPath, upstreamQuery, upstreamBody, err := rewriteModelRequest(r, body, route.RequestedModelID, route.UpstreamModelID)
 	if err != nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, nil, http.StatusBadGateway, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &route.Provider, nil, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	path, err := resolveProviderPath(route.Provider.BaseURL, upstreamPath)
+	if err != nil {
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &route.Provider, nil, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -448,26 +586,26 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		base:    proxyClient.Transport,
 		capture: &sentRequest,
 	}
-	client := s.newProviderClient(provider, &proxyClient)
-	options := buildProviderRequestOptions(r.Header, r.URL.Query())
+	client := s.newProviderClient(route.Provider, &proxyClient)
+	options := buildProviderRequestOptions(r.Header, upstreamQuery)
 
 	var requestBody any
-	if len(body) > 0 {
-		requestBody = bytes.NewReader(body)
+	if len(upstreamBody) > 0 {
+		requestBody = bytes.NewReader(upstreamBody)
 	}
 
 	var response *http.Response
 	err = client.Execute(r.Context(), r.Method, path, requestBody, &response, options...)
 	if err != nil && response == nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, &sentRequest, http.StatusBadGateway, fmt.Sprintf("upstream request failed: %v", err))
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &route.Provider, &sentRequest, http.StatusBadGateway, fmt.Sprintf("upstream request failed: %v", err))
 		return
 	}
 	if response == nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, &sentRequest, http.StatusBadGateway, "upstream request returned no response")
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &route.Provider, &sentRequest, http.StatusBadGateway, "upstream request returned no response")
 		return
 	}
 
-	capture := copyUpstreamResponse(w, response, provider.Name, modelID, s.logger)
+	capture := copyUpstreamResponse(w, response, route.Provider.Name, route.RequestedModelID, s.logger)
 	errorText := ""
 	if err != nil {
 		errorText = err.Error()
@@ -486,8 +624,8 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		SentHeaders:           sentRequest.HeadersJSON,
 		SentBody:              sentRequest.Body,
 		SentBodyTruncated:     sentRequest.BodyTruncated,
-		ProviderID:            &provider.ID,
-		ProviderName:          provider.Name,
+		ProviderID:            &route.Provider.ID,
+		ProviderName:          route.Provider.Name,
 		ResponseStatus:        capture.StatusCode,
 		ResponseHeaders:       capture.HeadersJSON,
 		ResponseBody:          capture.Body,

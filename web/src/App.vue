@@ -2,11 +2,14 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import ModelCard from './components/ModelCard.vue'
+import ModelAliasCard from './components/ModelAliasCard.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import RequestLogCard from './components/RequestLogCard.vue'
 import StatCard from './components/StatCard.vue'
 import type {
 	DeleteProxyRequestsPayload,
+	ModelAliasView,
+	ModelAliasesPayload,
 	ModelDisableRuleSelection,
 	ModelRoute,
 	ModelsPayload,
@@ -20,12 +23,15 @@ import type {
 
 const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
+const modelAliases = ref<ModelAliasView[]>([])
 const requestLogs = ref<ProxyRequestLogView[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const aliasSaving = ref(false)
 const syncingAll = ref(false)
 const syncingProviderId = ref<number | null>(null)
 const editingProviderId = ref<number | null>(null)
+const editingModelAliasId = ref<number | null>(null)
 const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
 const selectedModelDisableRule = ref<ModelDisableRuleSelection | null>(null)
@@ -39,6 +45,12 @@ const form = reactive({
 	enabled: true,
 })
 
+const modelAliasForm = reactive({
+	aliasModelId: '',
+	targetModelId: '',
+	targetProviderId: '',
+})
+
 const clearRequestLogsForm = reactive({
 	providerId: '',
 	from: '',
@@ -49,9 +61,46 @@ const gatewayBase = computed(() => `${window.location.origin}/v1`)
 const providerCount = computed(() => providers.value.length)
 const enabledProviderCount = computed(() => providers.value.filter((provider) => provider.enabled).length)
 const modelCount = computed(() => models.value.length)
+const modelAliasCount = computed(() => modelAliases.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
 const isEditing = computed(() => editingProviderId.value !== null)
+const isEditingModelAlias = computed(() => editingModelAliasId.value !== null)
+const enabledProviderOptions = computed(() => providers.value.filter((provider) => provider.enabled))
+const selectedAliasTargetProvider = computed(() => {
+	if (modelAliasForm.targetProviderId === '') {
+		return null
+	}
+
+	return providers.value.find((provider) => provider.id === Number(modelAliasForm.targetProviderId)) ?? null
+})
+const aliasTargetProviderOptions = computed(() => {
+	const options = [...enabledProviderOptions.value]
+	const selectedProvider = selectedAliasTargetProvider.value
+	if (selectedProvider !== null && !selectedProvider.enabled && !options.some((provider) => provider.id === selectedProvider.id)) {
+		options.unshift(selectedProvider)
+	}
+
+	return options
+})
+const targetModelOptions = computed(() => {
+	const sourceProvider = selectedAliasTargetProvider.value
+	const sourceProviders = sourceProvider === null ? enabledProviderOptions.value : [sourceProvider]
+	const unique = new Set<string>()
+	const options: string[] = []
+
+	for (const provider of sourceProviders) {
+		for (const modelId of provider.models) {
+			if (unique.has(modelId)) {
+				continue
+			}
+			unique.add(modelId)
+			options.push(modelId)
+		}
+	}
+
+	return options.sort((left, right) => left.localeCompare(right))
+})
 const activeModelDisableRules = computed(() =>
 	providers.value
 		.flatMap((provider) =>
@@ -131,6 +180,18 @@ function reconcileSelectedModelDisableRule() {
 	}
 }
 
+function reconcileEditingModelAlias() {
+	const editingId = editingModelAliasId.value
+	if (editingId === null) {
+		return
+	}
+
+	const alias = modelAliases.value.find((candidate) => candidate.id === editingId)
+	if (alias === undefined) {
+		resetModelAliasForm()
+	}
+}
+
 function resetForm() {
 	editingProviderId.value = null
 	form.name = ''
@@ -138,6 +199,13 @@ function resetForm() {
 	form.apiKey = ''
 	form.userAgent = ''
 	form.enabled = true
+}
+
+function resetModelAliasForm() {
+	editingModelAliasId.value = null
+	modelAliasForm.aliasModelId = ''
+	modelAliasForm.targetModelId = ''
+	modelAliasForm.targetProviderId = ''
 }
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -158,15 +226,18 @@ async function loadDashboard(showNotice = false) {
 	clearNotice()
 
 	try {
-		const [providerPayload, modelPayload, requestPayload] = await Promise.all([
+		const [providerPayload, modelPayload, aliasPayload, requestPayload] = await Promise.all([
 			request<ProvidersPayload>('/api/providers'),
 			request<ModelsPayload>('/api/models'),
+			request<ModelAliasesPayload>('/api/model-aliases'),
 			request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`),
 		])
 		providers.value = providerPayload.providers
 		models.value = modelPayload.models
+		modelAliases.value = aliasPayload.aliases
 		requestLogs.value = requestPayload.requests
 		reconcileSelectedModelDisableRule()
+		reconcileEditingModelAlias()
 
 		if (showNotice) {
 			setNotice('info', 'Dashboard refreshed.')
@@ -185,6 +256,15 @@ function beginEdit(provider: ProviderView) {
 	form.apiKey = ''
 	form.userAgent = provider.userAgent ?? ''
 	form.enabled = provider.enabled
+	clearNotice()
+	window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function beginEditModelAlias(alias: ModelAliasView) {
+	editingModelAliasId.value = alias.id
+	modelAliasForm.aliasModelId = alias.aliasModelId
+	modelAliasForm.targetModelId = alias.targetModelId
+	modelAliasForm.targetProviderId = alias.targetProviderId === undefined ? '' : String(alias.targetProviderId)
 	clearNotice()
 	window.scrollTo({ top: 0, behavior: 'smooth' })
 }
@@ -284,6 +364,59 @@ async function removeProvider(provider: ProviderView) {
 		setNotice('success', `Deleted ${provider.name}.`)
 	} catch (error) {
 		setNotice('error', error instanceof Error ? error.message : `Failed to delete ${provider.name}.`)
+	}
+}
+
+async function submitModelAlias() {
+	aliasSaving.value = true
+	clearNotice()
+
+	const method = editingModelAliasId.value === null ? 'POST' : 'PUT'
+	const endpoint = editingModelAliasId.value === null ? '/api/model-aliases' : `/api/model-aliases/${editingModelAliasId.value}`
+
+	try {
+		await request(endpoint, {
+			method,
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				aliasModelId: modelAliasForm.aliasModelId,
+				targetModelId: modelAliasForm.targetModelId,
+				targetProviderId: modelAliasForm.targetProviderId === '' ? undefined : Number(modelAliasForm.targetProviderId),
+			}),
+		})
+
+		resetModelAliasForm()
+		await loadDashboard()
+		setNotice('success', method === 'POST' ? 'Model alias created.' : 'Model alias updated.')
+	} catch (error) {
+		setNotice('error', error instanceof Error ? error.message : 'Failed to save model alias.')
+	} finally {
+		aliasSaving.value = false
+	}
+}
+
+async function removeModelAlias(alias: ModelAliasView) {
+	if (!window.confirm(`Delete model alias "${alias.aliasModelId}"?`)) {
+		return
+	}
+
+	clearNotice()
+
+	try {
+		await request(`/api/model-aliases/${alias.id}`, {
+			method: 'DELETE',
+		})
+
+		if (editingModelAliasId.value === alias.id) {
+			resetModelAliasForm()
+		}
+
+		await loadDashboard()
+		setNotice('success', `Deleted ${alias.aliasModelId}.`)
+	} catch (error) {
+		setNotice('error', error instanceof Error ? error.message : `Failed to delete ${alias.aliasModelId}.`)
 	}
 }
 
@@ -440,9 +573,10 @@ onMounted(() => {
 				</button>
 			</div>
 
-			<div class="grid gap-[18px] md:grid-cols-3">
+			<div class="grid gap-[18px] md:grid-cols-2 xl:grid-cols-4">
 				<StatCard label="Providers" :value="providerCount" :description="`${enabledProviderCount} enabled for routing`" />
 				<StatCard label="Models" :value="modelCount" description="From synced `/v1/models` catalogs" />
+				<StatCard label="Aliases" :value="modelAliasCount" description="Public model names mapped to upstream targets" />
 				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
 			</div>
 		</header>
@@ -661,6 +795,119 @@ onMounted(() => {
 						>
 							{{ rule.providerName }} · {{ rule.modelId }}
 						</button>
+					</div>
+				</article>
+			</div>
+		</section>
+
+		<section
+			data-anchor="model-aliases"
+			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+		>
+			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+				<div>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model aliases</p>
+					<h2>Create public model names</h2>
+				</div>
+				<span class="text-ink-soft">{{ modelAliasCount }} alias{{ modelAliasCount === 1 ? '' : 'es' }}</span>
+			</div>
+
+			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+				<article data-anchor="model-alias-form" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+					<div>
+						<h3>{{ isEditingModelAlias ? 'Update alias' : 'Add alias' }}</h3>
+						<p class="mt-1.5 leading-[1.6] text-ink-soft">
+							Create a new public model name and point it at a model, optionally locking it to one provider.
+						</p>
+					</div>
+
+					<form class="grid gap-4" @submit.prevent="submitModelAlias">
+						<label class="grid gap-2">
+							<span class="text-[0.92rem] font-bold text-ink-strong">Alias model name</span>
+							<input
+								v-model.trim="modelAliasForm.aliasModelId"
+								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+								type="text"
+								autocomplete="off"
+								placeholder="team-gateway"
+								required
+							/>
+						</label>
+
+						<label class="grid gap-2">
+							<span class="text-[0.92rem] font-bold text-ink-strong">Target model</span>
+							<input
+								v-model.trim="modelAliasForm.targetModelId"
+								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+								list="model-alias-target-models"
+								type="text"
+								autocomplete="off"
+								placeholder="gpt-4.1"
+								required
+							/>
+							<datalist id="model-alias-target-models">
+								<option v-for="modelId in targetModelOptions" :key="modelId" :value="modelId" />
+							</datalist>
+						</label>
+
+						<label class="grid gap-2">
+							<span class="text-[0.92rem] font-bold text-ink-strong">Target provider (optional)</span>
+							<select
+								v-model="modelAliasForm.targetProviderId"
+								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							>
+								<option value="">Any enabled provider</option>
+								<option v-for="provider in aliasTargetProviderOptions" :key="provider.id" :value="String(provider.id)">
+									{{ provider.name }}{{ provider.enabled ? '' : ' (disabled)' }}
+								</option>
+							</select>
+							<small class="text-ink-soft">Leave blank to route through any enabled provider that serves the target model.</small>
+						</label>
+
+						<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="submit"
+								:disabled="aliasSaving"
+							>
+								{{ aliasSaving ? 'Saving…' : isEditingModelAlias ? 'Update alias' : 'Create alias' }}
+							</button>
+							<button
+								v-if="isEditingModelAlias"
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="button"
+								@click="resetModelAliasForm"
+							>
+								Cancel edit
+							</button>
+						</div>
+					</form>
+				</article>
+
+				<article data-anchor="model-alias-list" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+					<div>
+						<h3>Configured aliases</h3>
+						<p class="mt-1.5 leading-[1.6] text-ink-soft">
+							These aliases are exposed by `/v1/models` and are available to clients as if they were native model names.
+						</p>
+					</div>
+
+					<p
+						v-if="modelAliases.length === 0"
+						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+					>
+						No aliases have been configured yet.
+					</p>
+
+					<div v-else class="grid gap-3">
+						<ModelAliasCard
+							v-for="alias in modelAliases"
+							:key="alias.id"
+							:alias="alias"
+							:editing="editingModelAliasId === alias.id"
+							@edit="beginEditModelAlias(alias)"
+							@delete="removeModelAlias(alias)"
+						/>
 					</div>
 				</article>
 			</div>

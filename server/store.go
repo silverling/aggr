@@ -13,6 +13,9 @@ import (
 var (
 	errProviderNotFound      = errors.New("provider not found")
 	errProviderModelNotFound = errors.New("provider does not serve model")
+	errModelAliasNotFound    = errors.New("model alias not found")
+	errModelAliasConflict    = errors.New("model alias conflict")
+	errModelAliasTarget      = errors.New("model alias target is not routable")
 )
 
 // providerRecord is the internal database representation of a configured provider.
@@ -83,6 +86,62 @@ type routeModelView struct {
 	ID string `json:"id"`
 	// Providers lists the enabled providers that currently serve the model.
 	Providers []routeProviderView `json:"providers"`
+}
+
+// modelAliasRecord is the internal database representation of one configured
+// alias model and the routable target it resolves to.
+type modelAliasRecord struct {
+	// ID is the database primary key for the alias row.
+	ID int64
+	// AliasModelID is the new public model name exposed by the gateway.
+	AliasModelID string
+	// TargetModelID is the upstream model name that requests should use.
+	TargetModelID string
+	// TargetProviderID optionally pins the alias to one provider.
+	TargetProviderID sql.NullInt64
+	// TargetProviderName stores the pinned provider's display name when the
+	// record is read through a provider join.
+	TargetProviderName string
+	// CreatedAt records when the alias row was inserted.
+	CreatedAt time.Time
+	// UpdatedAt records when the alias row was last modified.
+	UpdatedAt time.Time
+}
+
+// modelAliasMutation captures the normalized fields used when creating or
+// updating a model alias.
+type modelAliasMutation struct {
+	// AliasModelID is the new public model name exposed by the gateway.
+	AliasModelID string
+	// TargetModelID is the upstream model name that requests should use.
+	TargetModelID string
+	// TargetProviderID optionally pins the alias to one provider.
+	TargetProviderID *int64
+}
+
+// modelAliasView is the JSON payload returned to the Web UI for configured
+// model aliases.
+type modelAliasView struct {
+	// ID is the alias identifier.
+	ID int64 `json:"id"`
+	// AliasModelID is the new public model name exposed by the gateway.
+	AliasModelID string `json:"aliasModelId"`
+	// TargetModelID is the upstream model name that requests should use.
+	TargetModelID string `json:"targetModelId"`
+	// TargetProviderID optionally pins the alias to one provider.
+	TargetProviderID int64 `json:"targetProviderId,omitempty"`
+	// TargetProviderName is the pinned provider label when one is configured.
+	TargetProviderName string `json:"targetProviderName,omitempty"`
+	// Providers lists the enabled providers that currently make the alias
+	// routable after disable rules are applied.
+	Providers []routeProviderView `json:"providers"`
+	// Routable reports whether the alias currently resolves to at least one
+	// enabled provider route.
+	Routable bool `json:"routable"`
+	// CreatedAt records when the alias row was inserted.
+	CreatedAt string `json:"createdAt"`
+	// UpdatedAt records when the alias row was last modified.
+	UpdatedAt string `json:"updatedAt"`
 }
 
 // proxyRequestReceivedRequestView is the received-request section exposed by
@@ -317,6 +376,17 @@ func (s *store) migrate(ctx context.Context) error {
 			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_model_disable_rules_model_id ON provider_model_disable_rules (model_id, provider_id);`,
+		`CREATE TABLE IF NOT EXISTS model_aliases (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			alias_model_id TEXT NOT NULL UNIQUE,
+			target_model_id TEXT NOT NULL,
+			target_provider_id INTEGER,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (target_provider_id) REFERENCES providers(id) ON DELETE CASCADE
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_target_model_id ON model_aliases (target_model_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_target_provider_id ON model_aliases (target_provider_id, target_model_id);`,
 		`CREATE TABLE IF NOT EXISTS proxy_request_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			provider_id INTEGER,
@@ -906,6 +976,49 @@ func (s *store) listRouteModels(ctx context.Context) ([]routeModelView, error) {
 	return models, nil
 }
 
+// listPublicRouteModels returns the aggregated provider-backed models together
+// with any configured alias models that currently resolve to at least one route.
+func (s *store) listPublicRouteModels(ctx context.Context) ([]routeModelView, error) {
+	models, err := s.listRouteModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	modelIndex := make(map[string]int, len(models))
+	for index := range models {
+		modelIndex[models[index].ID] = index
+	}
+
+	aliases, err := s.listModelAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, alias := range aliases {
+		providers, err := s.listProvidersForAlias(ctx, alias)
+		if err != nil {
+			return nil, err
+		}
+		if len(providers) == 0 {
+			continue
+		}
+		if _, found := modelIndex[alias.AliasModelID]; found {
+			continue
+		}
+
+		models = append(models, routeModelView{
+			ID:        alias.AliasModelID,
+			Providers: providers,
+		})
+	}
+
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].ID < models[j].ID
+	})
+
+	return models, nil
+}
+
 // findProviderForModel returns the most recent enabled provider that serves a model.
 func (s *store) findProviderForModel(ctx context.Context, modelID string) (providerRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
@@ -928,6 +1041,312 @@ func (s *store) findProviderForModel(ctx context.Context, modelID string) (provi
 
 	record.Models = []string{modelID}
 	return record, nil
+}
+
+// listModelAliases returns every configured alias model ordered by alias name.
+func (s *store) listModelAliases(ctx context.Context) ([]modelAliasRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ma.id, ma.alias_model_id, ma.target_model_id, ma.target_provider_id, p.name, ma.created_at, ma.updated_at
+		FROM model_aliases ma
+		LEFT JOIN providers p ON p.id = ma.target_provider_id
+		ORDER BY ma.alias_model_id ASC, ma.id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query model aliases: %w", err)
+	}
+	defer rows.Close()
+
+	aliases := make([]modelAliasRecord, 0)
+	for rows.Next() {
+		record, err := scanModelAlias(rows)
+		if err != nil {
+			return nil, err
+		}
+		aliases = append(aliases, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate model aliases: %w", err)
+	}
+
+	return aliases, nil
+}
+
+// listModelAliasViews returns the configured aliases together with their
+// currently routable provider summaries.
+func (s *store) listModelAliasViews(ctx context.Context) ([]modelAliasView, error) {
+	aliases, err := s.listModelAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	views := make([]modelAliasView, 0, len(aliases))
+	for _, alias := range aliases {
+		providers, err := s.listProvidersForAlias(ctx, alias)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, alias.toView(providers))
+	}
+
+	return views, nil
+}
+
+// getModelAlias retrieves one alias row by its database identifier.
+func (s *store) getModelAlias(ctx context.Context, id int64) (modelAliasRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT ma.id, ma.alias_model_id, ma.target_model_id, ma.target_provider_id, p.name, ma.created_at, ma.updated_at
+		FROM model_aliases ma
+		LEFT JOIN providers p ON p.id = ma.target_provider_id
+		WHERE ma.id = ?
+	`, id)
+
+	record, err := scanModelAlias(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return modelAliasRecord{}, errModelAliasNotFound
+		}
+		return modelAliasRecord{}, err
+	}
+
+	return record, nil
+}
+
+// getModelAliasByName retrieves one alias row by its public model identifier.
+func (s *store) getModelAliasByName(ctx context.Context, aliasModelID string) (modelAliasRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT ma.id, ma.alias_model_id, ma.target_model_id, ma.target_provider_id, p.name, ma.created_at, ma.updated_at
+		FROM model_aliases ma
+		LEFT JOIN providers p ON p.id = ma.target_provider_id
+		WHERE ma.alias_model_id = ?
+	`, aliasModelID)
+
+	record, err := scanModelAlias(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return modelAliasRecord{}, errModelAliasNotFound
+		}
+		return modelAliasRecord{}, err
+	}
+
+	return record, nil
+}
+
+// createModelAlias inserts a new alias row after validating the configured
+// target route and ensuring the alias name does not collide with a routable model.
+func (s *store) createModelAlias(ctx context.Context, mutation modelAliasMutation) (modelAliasRecord, error) {
+	if err := s.validateModelAliasMutation(ctx, mutation, nil); err != nil {
+		return modelAliasRecord{}, err
+	}
+
+	now := nowRFC3339()
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO model_aliases (alias_model_id, target_model_id, target_provider_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, mutation.AliasModelID, mutation.TargetModelID, nullableInt64(mutation.TargetProviderID), now, now)
+	if err != nil {
+		return modelAliasRecord{}, fmt.Errorf("insert model alias: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return modelAliasRecord{}, fmt.Errorf("read model alias id: %w", err)
+	}
+
+	return s.getModelAlias(ctx, id)
+}
+
+// updateModelAlias updates an existing alias row and revalidates the requested
+// route target before persisting the new configuration.
+func (s *store) updateModelAlias(ctx context.Context, id int64, mutation modelAliasMutation) (modelAliasRecord, error) {
+	if _, err := s.getModelAlias(ctx, id); err != nil {
+		return modelAliasRecord{}, err
+	}
+	if err := s.validateModelAliasMutation(ctx, mutation, &id); err != nil {
+		return modelAliasRecord{}, err
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE model_aliases
+		SET alias_model_id = ?, target_model_id = ?, target_provider_id = ?, updated_at = ?
+		WHERE id = ?
+	`, mutation.AliasModelID, mutation.TargetModelID, nullableInt64(mutation.TargetProviderID), nowRFC3339(), id)
+	if err != nil {
+		return modelAliasRecord{}, fmt.Errorf("update model alias: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return modelAliasRecord{}, fmt.Errorf("read updated model alias rows: %w", err)
+	}
+	if affected == 0 {
+		return modelAliasRecord{}, errModelAliasNotFound
+	}
+
+	return s.getModelAlias(ctx, id)
+}
+
+// deleteModelAlias removes one alias row from the database.
+func (s *store) deleteModelAlias(ctx context.Context, id int64) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM model_aliases WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete model alias: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read deleted model alias rows: %w", err)
+	}
+	if affected == 0 {
+		return errModelAliasNotFound
+	}
+
+	return nil
+}
+
+// listProvidersForAlias returns the enabled provider routes that currently make
+// an alias routable.
+func (s *store) listProvidersForAlias(ctx context.Context, alias modelAliasRecord) ([]routeProviderView, error) {
+	if alias.TargetProviderID.Valid {
+		provider, err := s.getRoutableProviderForModel(ctx, alias.TargetProviderID.Int64, alias.TargetModelID)
+		if err != nil {
+			if errors.Is(err, errProviderNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return []routeProviderView{{ID: provider.ID, Name: provider.Name}}, nil
+	}
+
+	return s.listProvidersForModel(ctx, alias.TargetModelID)
+}
+
+// listProvidersForModel returns the enabled provider summaries that can route a
+// model after applying model disable rules.
+func (s *store) listProvidersForModel(ctx context.Context, modelID string) ([]routeProviderView, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id, p.name
+		FROM provider_models pm
+		INNER JOIN providers p ON p.id = pm.provider_id
+		LEFT JOIN provider_model_disable_rules dr ON dr.provider_id = pm.provider_id AND dr.model_id = pm.model_id
+		WHERE p.enabled = 1 AND pm.model_id = ? AND dr.provider_id IS NULL
+		ORDER BY p.name ASC, p.id ASC
+	`, modelID)
+	if err != nil {
+		return nil, fmt.Errorf("query route providers: %w", err)
+	}
+	defer rows.Close()
+
+	providers := make([]routeProviderView, 0)
+	for rows.Next() {
+		var providerID int64
+		var providerName string
+		if err := rows.Scan(&providerID, &providerName); err != nil {
+			return nil, fmt.Errorf("scan route provider: %w", err)
+		}
+		providers = append(providers, routeProviderView{ID: providerID, Name: providerName})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate route providers: %w", err)
+	}
+
+	return providers, nil
+}
+
+// getRoutableProviderForModel returns one specific provider only when it can
+// currently route the requested model.
+func (s *store) getRoutableProviderForModel(ctx context.Context, providerID int64, modelID string) (providerRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT p.id, p.name, p.base_url, p.api_key, p.user_agent, p.enabled, p.last_error, p.last_synced_at, p.created_at, p.updated_at
+		FROM providers p
+		INNER JOIN provider_models pm ON pm.provider_id = p.id
+		LEFT JOIN provider_model_disable_rules dr ON dr.provider_id = pm.provider_id AND dr.model_id = pm.model_id
+		WHERE p.id = ? AND p.enabled = 1 AND pm.model_id = ? AND dr.provider_id IS NULL
+		LIMIT 1
+	`, providerID, modelID)
+
+	record, err := scanProvider(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return providerRecord{}, errProviderNotFound
+		}
+		return providerRecord{}, err
+	}
+
+	record.Models = []string{modelID}
+	return record, nil
+}
+
+// validateModelAliasMutation checks alias collisions and ensures the target
+// route is currently usable before the alias is persisted.
+func (s *store) validateModelAliasMutation(ctx context.Context, mutation modelAliasMutation, excludeID *int64) error {
+	mutation.AliasModelID = strings.TrimSpace(mutation.AliasModelID)
+	mutation.TargetModelID = strings.TrimSpace(mutation.TargetModelID)
+	if mutation.AliasModelID == "" {
+		return errors.New("alias model id is required")
+	}
+	if mutation.TargetModelID == "" {
+		return errors.New("target model id is required")
+	}
+	if mutation.AliasModelID == mutation.TargetModelID {
+		return errors.New("alias model id must differ from target model id")
+	}
+
+	if collision, err := s.modelAliasConflicts(ctx, mutation.AliasModelID, excludeID); err != nil {
+		return err
+	} else if collision {
+		return fmt.Errorf("%w: alias model %q conflicts with an existing routable model", errModelAliasConflict, mutation.AliasModelID)
+	}
+
+	if mutation.TargetProviderID != nil {
+		if _, err := s.getRoutableProviderForModel(ctx, *mutation.TargetProviderID, mutation.TargetModelID); err != nil {
+			if errors.Is(err, errProviderNotFound) {
+				return fmt.Errorf("%w: provider %d does not route model %q", errModelAliasTarget, *mutation.TargetProviderID, mutation.TargetModelID)
+			}
+			return err
+		}
+		return nil
+	}
+
+	if provider, err := s.findProviderForModel(ctx, mutation.TargetModelID); err != nil {
+		if errors.Is(err, errProviderNotFound) {
+			return fmt.Errorf("%w: model %q is not routed by any enabled provider", errModelAliasTarget, mutation.TargetModelID)
+		}
+		return err
+	} else if provider.ID <= 0 {
+		return fmt.Errorf("%w: model %q is not routed by any enabled provider", errModelAliasTarget, mutation.TargetModelID)
+	}
+
+	return nil
+}
+
+// modelAliasConflicts reports whether the alias name collides with a routed
+// provider model or another alias row.
+func (s *store) modelAliasConflicts(ctx context.Context, aliasModelID string, excludeID *int64) (bool, error) {
+	var providerCount int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM provider_models
+		WHERE model_id = ?
+	`, aliasModelID).Scan(&providerCount); err != nil {
+		return false, fmt.Errorf("query alias model conflicts: %w", err)
+	}
+	if providerCount > 0 {
+		return true, nil
+	}
+
+	query := `SELECT COUNT(1) FROM model_aliases WHERE alias_model_id = ?`
+	args := []any{aliasModelID}
+	if excludeID != nil {
+		query += " AND id <> ?"
+		args = append(args, *excludeID)
+	}
+
+	var aliasCount int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&aliasCount); err != nil {
+		return false, fmt.Errorf("query existing model aliases: %w", err)
+	}
+
+	return aliasCount > 0, nil
 }
 
 // attachModels populates the model lists and disabled-model lists for a batch
@@ -1154,6 +1573,45 @@ func scanProvider(scanner interface {
 	return record, nil
 }
 
+// scanModelAlias reads an alias row from either a query row or rows iterator.
+func scanModelAlias(scanner interface {
+	Scan(dest ...any) error
+}) (modelAliasRecord, error) {
+	var (
+		record             modelAliasRecord
+		targetProviderName sql.NullString
+		createdAtRaw       string
+		updatedAtRaw       string
+	)
+
+	if err := scanner.Scan(
+		&record.ID,
+		&record.AliasModelID,
+		&record.TargetModelID,
+		&record.TargetProviderID,
+		&targetProviderName,
+		&createdAtRaw,
+		&updatedAtRaw,
+	); err != nil {
+		return modelAliasRecord{}, err
+	}
+
+	record.TargetProviderName = targetProviderName.String
+
+	createdAt, err := time.Parse(time.RFC3339, createdAtRaw)
+	if err != nil {
+		return modelAliasRecord{}, fmt.Errorf("parse model alias created_at: %w", err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339, updatedAtRaw)
+	if err != nil {
+		return modelAliasRecord{}, fmt.Errorf("parse model alias updated_at: %w", err)
+	}
+	record.CreatedAt = createdAt
+	record.UpdatedAt = updatedAt
+
+	return record, nil
+}
+
 // toView converts the internal provider record into the redacted UI payload.
 func (p providerRecord) toView() providerView {
 	view := providerView{
@@ -1170,6 +1628,24 @@ func (p providerRecord) toView() providerView {
 	}
 	if p.LastSyncedAt != nil {
 		view.LastSyncedAt = p.LastSyncedAt.UTC().Format(time.RFC3339)
+	}
+	return view
+}
+
+// toView converts the internal alias record into the JSON payload used by the UI.
+func (record modelAliasRecord) toView(providers []routeProviderView) modelAliasView {
+	view := modelAliasView{
+		ID:                 record.ID,
+		AliasModelID:       record.AliasModelID,
+		TargetModelID:      record.TargetModelID,
+		TargetProviderName: record.TargetProviderName,
+		Providers:          append([]routeProviderView(nil), providers...),
+		Routable:           len(providers) > 0,
+		CreatedAt:          record.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:          record.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	if record.TargetProviderID.Valid {
+		view.TargetProviderID = record.TargetProviderID.Int64
 	}
 	return view
 }

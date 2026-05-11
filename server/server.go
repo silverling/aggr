@@ -67,6 +67,17 @@ type modelDisableRulePayload struct {
 	Disabled bool `json:"disabled"`
 }
 
+// modelAliasPayload is the JSON body accepted by the model-alias create and
+// update APIs.
+type modelAliasPayload struct {
+	// AliasModelID is the public model name exposed by the gateway.
+	AliasModelID string `json:"aliasModelId"`
+	// TargetModelID is the upstream model name that requests should use.
+	TargetModelID string `json:"targetModelId"`
+	// TargetProviderID optionally pins the alias to one provider.
+	TargetProviderID *int64 `json:"targetProviderId"`
+}
+
 // syncAllResponse reports the per-provider result of a bulk model catalog sync.
 type syncAllResponse struct {
 	Results map[int64]string `json:"results"`
@@ -127,6 +138,10 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/providers/{id}/sync", s.handleSyncProvider)
 	mux.HandleFunc("POST /api/providers/sync", s.handleSyncAllProviders)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
+	mux.HandleFunc("GET /api/model-aliases", s.handleListModelAliases)
+	mux.HandleFunc("POST /api/model-aliases", s.handleCreateModelAlias)
+	mux.HandleFunc("PUT /api/model-aliases/{id}", s.handleUpdateModelAlias)
+	mux.HandleFunc("DELETE /api/model-aliases/{id}", s.handleDeleteModelAlias)
 	mux.HandleFunc("PUT /api/model-disable-rules", s.handleSetModelDisableRule)
 	mux.HandleFunc("GET /api/requests", s.handleListProxyRequests)
 	mux.HandleFunc("DELETE /api/requests", s.handleDeleteProxyRequests)
@@ -300,6 +315,98 @@ func (s *server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleListModelAliases returns the configured model aliases for the Web UI.
+func (s *server) handleListModelAliases(w http.ResponseWriter, r *http.Request) {
+	aliases, err := s.store.listModelAliasViews(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"aliases": aliases,
+	})
+}
+
+// handleCreateModelAlias inserts a new alias model and returns the persisted
+// record together with its current routability snapshot.
+func (s *server) handleCreateModelAlias(w http.ResponseWriter, r *http.Request) {
+	mutation, err := decodeModelAliasPayload(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	alias, err := s.store.createModelAlias(r.Context(), mutation)
+	if err != nil {
+		s.writeModelAliasError(w, err)
+		return
+	}
+
+	view, err := s.loadModelAliasView(r.Context(), alias.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"alias": view,
+	})
+}
+
+// handleUpdateModelAlias updates an existing alias and returns the refreshed
+// record together with its current routability snapshot.
+func (s *server) handleUpdateModelAlias(w http.ResponseWriter, r *http.Request) {
+	id, err := parseModelAliasID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	mutation, err := decodeModelAliasPayload(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	alias, err := s.store.updateModelAlias(r.Context(), id, mutation)
+	if err != nil {
+		s.writeModelAliasError(w, err)
+		return
+	}
+
+	view, err := s.loadModelAliasView(r.Context(), alias.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"alias": view,
+	})
+}
+
+// handleDeleteModelAlias removes one configured alias model.
+func (s *server) handleDeleteModelAlias(w http.ResponseWriter, r *http.Request) {
+	id, err := parseModelAliasID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.store.deleteModelAlias(r.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, errModelAliasNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleSetModelDisableRule creates or removes one provider/model disable rule.
 func (s *server) handleSetModelDisableRule(w http.ResponseWriter, r *http.Request) {
 	payload, err := decodeModelDisableRulePayload(r)
@@ -380,7 +487,7 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 	auditContext := context.WithoutCancel(r.Context())
 	logID := s.createProxyRequestAudit(auditContext, r, "", nil)
 
-	models, err := s.store.listRouteModels(r.Context())
+	models, err := s.store.listPublicRouteModels(r.Context())
 	if err != nil {
 		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusInternalServerError, err.Error())
 		return
@@ -541,6 +648,32 @@ func decodeModelDisableRulePayload(r *http.Request) (modelDisableRulePayload, er
 	return payload, nil
 }
 
+// decodeModelAliasPayload parses and validates the model-alias request body.
+func decodeModelAliasPayload(r *http.Request) (modelAliasMutation, error) {
+	var payload modelAliasPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		return modelAliasMutation{}, fmt.Errorf("decode model alias payload: %w", err)
+	}
+
+	payload.AliasModelID = strings.TrimSpace(payload.AliasModelID)
+	payload.TargetModelID = strings.TrimSpace(payload.TargetModelID)
+	if payload.AliasModelID == "" {
+		return modelAliasMutation{}, errors.New("aliasModelId is required")
+	}
+	if payload.TargetModelID == "" {
+		return modelAliasMutation{}, errors.New("targetModelId is required")
+	}
+	if payload.TargetProviderID != nil && *payload.TargetProviderID <= 0 {
+		return modelAliasMutation{}, errors.New("targetProviderId must be a positive integer")
+	}
+
+	return modelAliasMutation{
+		AliasModelID:     payload.AliasModelID,
+		TargetModelID:    payload.TargetModelID,
+		TargetProviderID: payload.TargetProviderID,
+	}, nil
+}
+
 // decodeProviderPayloadForUpdate parses update payloads and reports whether the API key should be preserved.
 func decodeProviderPayloadForUpdate(r *http.Request) (providerMutation, bool, error) {
 	var payload providerPayload
@@ -592,6 +725,15 @@ func parseProviderID(raw string) (int64, error) {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, fmt.Errorf("invalid provider id %q", raw)
+	}
+	return id, nil
+}
+
+// parseModelAliasID converts a path parameter into a positive alias identifier.
+func parseModelAliasID(raw string) (int64, error) {
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid model alias id %q", raw)
 	}
 	return id, nil
 }
@@ -653,4 +795,39 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{
 		"error": message,
 	})
+}
+
+// loadModelAliasView returns one alias record together with its current
+// routability snapshot for the dashboard response bodies.
+func (s *server) loadModelAliasView(ctx context.Context, id int64) (modelAliasView, error) {
+	alias, err := s.store.getModelAlias(ctx, id)
+	if err != nil {
+		return modelAliasView{}, err
+	}
+
+	providers, err := s.store.listProvidersForAlias(ctx, alias)
+	if err != nil {
+		return modelAliasView{}, err
+	}
+
+	return alias.toView(providers), nil
+}
+
+// writeModelAliasError maps model-alias store errors into the most appropriate
+// HTTP status code for the admin API.
+func (s *server) writeModelAliasError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errModelAliasNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errModelAliasConflict):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, errModelAliasTarget):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, errProviderNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errProviderModelNotFound):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
 }
