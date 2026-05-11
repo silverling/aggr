@@ -1,37 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import ModelCard from './components/ModelCard.vue'
+import NoticeBanner from './components/NoticeBanner.vue'
+import ProviderCard from './components/ProviderCard.vue'
+import StatCard from './components/StatCard.vue'
+import type { ModelRoute, ModelsPayload, NoticeTone, ProviderView, ProvidersPayload } from './types'
 
-interface Provider {
-	id: number
-	name: string
-	baseUrl: string
-	enabled: boolean
-	models: string[]
-	lastError?: string
-	lastSyncedAt?: string
-	apiKeyConfigured: boolean
-	apiKeyPreview?: string
-}
-
-interface ModelRoute {
-	id: string
-	providers: Array<{
-		id: number
-		name: string
-	}>
-}
-
-interface ProvidersPayload {
-	providers: Provider[]
-}
-
-interface ModelsPayload {
-	models: ModelRoute[]
-}
-
-type NoticeTone = 'success' | 'error' | 'info'
-
-const providers = ref<Provider[]>([])
+const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -45,11 +20,6 @@ const form = reactive({
 	baseUrl: 'https://api.openai.com/v1',
 	apiKey: '',
 	enabled: true,
-})
-
-const dateFormatter = new Intl.DateTimeFormat(undefined, {
-	dateStyle: 'medium',
-	timeStyle: 'short',
 })
 
 const gatewayBase = computed(() => `${window.location.origin}/v1`)
@@ -88,19 +58,6 @@ function resetForm() {
 	form.enabled = true
 }
 
-function formatTimestamp(value?: string) {
-	if (!value) {
-		return 'Not synced yet'
-	}
-
-	const parsed = new Date(value)
-	if (Number.isNaN(parsed.valueOf())) {
-		return value
-	}
-
-	return dateFormatter.format(parsed)
-}
-
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 	const response = await fetch(input, init)
 	const isJSON = response.headers.get('content-type')?.includes('application/json')
@@ -136,7 +93,7 @@ async function loadDashboard(showNotice = false) {
 	}
 }
 
-function beginEdit(provider: Provider) {
+function beginEdit(provider: ProviderView) {
 	editingProviderId.value = provider.id
 	form.name = provider.name
 	form.baseUrl = provider.baseUrl
@@ -177,7 +134,7 @@ async function submitProvider() {
 	}
 }
 
-async function syncProvider(provider: Provider) {
+async function syncProvider(provider: ProviderView) {
 	syncingProviderId.value = provider.id
 	clearNotice()
 
@@ -211,7 +168,7 @@ async function syncAll() {
 	}
 }
 
-async function removeProvider(provider: Provider) {
+async function removeProvider(provider: ProviderView) {
 	if (!window.confirm(`Delete provider "${provider.name}"?`)) {
 		return
 	}
@@ -252,8 +209,8 @@ onMounted(() => {
 	<div class="shell">
 		<header class="hero panel">
 			<div class="hero-copy">
-				<p class="eyebrow">OpenAI-compatible gateway</p>
-				<h1>One `/v1` endpoint, many upstream model providers.</h1>
+				<p class="eyebrow">Unified gateway</p>
+				<h1>Aggr</h1>
 				<p class="lede">
 					Store provider credentials in SQLite, discover their model catalogs, and proxy each request to the provider that actually serves the
 					requested model.
@@ -261,36 +218,22 @@ onMounted(() => {
 			</div>
 
 			<div class="hero-actions">
-				<button class="button subtle" type="button" :disabled="loading" @click="loadDashboard(true)">
+				<button class="button button-subtle" type="button" :disabled="loading" @click="loadDashboard(true)">
 					{{ loading ? 'Refreshing…' : 'Refresh dashboard' }}
 				</button>
-				<button class="button primary" type="button" :disabled="syncingAll" @click="syncAll">
+				<button class="button button-primary" type="button" :disabled="syncingAll" @click="syncAll">
 					{{ syncingAll ? 'Syncing catalogs…' : 'Sync all providers' }}
 				</button>
 			</div>
 
 			<div class="stats-grid">
-				<article class="stat-card">
-					<p>Providers</p>
-					<strong>{{ providerCount }}</strong>
-					<span>{{ enabledProviderCount }} enabled for routing</span>
-				</article>
-				<article class="stat-card">
-					<p>Models</p>
-					<strong>{{ modelCount }}</strong>
-					<span>From synced `/v1/models` catalogs</span>
-				</article>
-				<article class="stat-card">
-					<p>Coverage overlap</p>
-					<strong>{{ duplicateCoverageCount }}</strong>
-					<span>Models offered by multiple providers</span>
-				</article>
+				<StatCard label="Providers" :value="providerCount" :description="`${enabledProviderCount} enabled for routing`" />
+				<StatCard label="Models" :value="modelCount" description="From synced `/v1/models` catalogs" />
+				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
 			</div>
 		</header>
 
-		<div v-if="notice" :class="['notice', notice.tone]">
-			{{ notice.text }}
-		</div>
+		<NoticeBanner v-if="notice" :tone="notice.tone" :text="notice.text" />
 
 		<section class="top-grid">
 			<article class="panel">
@@ -329,7 +272,7 @@ onMounted(() => {
 						<span>Enabled for model routing</span>
 					</label>
 
-					<button class="button primary" type="submit" :disabled="saving">
+					<button class="button button-primary" type="submit" :disabled="saving">
 						{{ saving ? 'Saving…' : isEditing ? 'Update provider' : 'Create provider' }}
 					</button>
 				</form>
@@ -371,39 +314,15 @@ onMounted(() => {
 			<div v-if="providers.length === 0" class="empty-state">Add a provider above to start discovering models and proxying requests.</div>
 
 			<div v-else class="provider-grid">
-				<article v-for="provider in providers" :key="provider.id" class="provider-card">
-					<div class="provider-topline">
-						<div>
-							<h3>{{ provider.name }}</h3>
-							<p class="provider-url">{{ provider.baseUrl }}</p>
-						</div>
-						<span :class="['badge', provider.enabled ? 'enabled' : 'disabled']">
-							{{ provider.enabled ? 'Enabled' : 'Disabled' }}
-						</span>
-					</div>
-
-					<div class="provider-meta">
-						<span>{{ provider.apiKeyConfigured ? provider.apiKeyPreview : 'No API key' }}</span>
-						<span>{{ formatTimestamp(provider.lastSyncedAt) }}</span>
-					</div>
-
-					<p v-if="provider.lastError" class="provider-error">{{ provider.lastError }}</p>
-
-					<div v-if="provider.models.length > 0" class="chip-row">
-						<span v-for="model in provider.models" :key="model" class="chip">
-							{{ model }}
-						</span>
-					</div>
-					<p v-else class="provider-hint">No models synced yet.</p>
-
-					<div class="provider-actions">
-						<button class="button subtle" type="button" @click="beginEdit(provider)">Edit</button>
-						<button class="button subtle" type="button" :disabled="syncingProviderId === provider.id" @click="syncProvider(provider)">
-							{{ syncingProviderId === provider.id ? 'Syncing…' : 'Sync models' }}
-						</button>
-						<button class="button danger" type="button" @click="removeProvider(provider)">Delete</button>
-					</div>
-				</article>
+				<ProviderCard
+					v-for="provider in providers"
+					:key="provider.id"
+					:provider="provider"
+					:syncing="syncingProviderId === provider.id"
+					@edit="beginEdit(provider)"
+					@sync="syncProvider(provider)"
+					@delete="removeProvider(provider)"
+				/>
 			</div>
 		</section>
 
@@ -419,14 +338,7 @@ onMounted(() => {
 			<div v-if="models.length === 0" class="empty-state">Sync at least one provider catalog to populate the gateway&apos;s model routes.</div>
 
 			<div v-else class="model-grid">
-				<article v-for="model in models" :key="model.id" class="model-card">
-					<h3>{{ model.id }}</h3>
-					<div class="chip-row compact">
-						<span v-for="provider in model.providers" :key="provider.id" class="chip provider-chip">
-							{{ provider.name }}
-						</span>
-					</div>
-				</article>
+				<ModelCard v-for="model in models" :key="model.id" :model="model" />
 			</div>
 		</section>
 	</div>
