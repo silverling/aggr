@@ -110,12 +110,17 @@
 @utility panel {
 	position: relative;
 	overflow: hidden;
+	padding: 28px;
 	background: var(--color-surface);
 	border: 1px solid var(--color-line);
 	border-radius: var(--radius-panel);
 	box-shadow: var(--shadow-panel);
 	backdrop-filter: blur(18px);
 	animation: rise 460ms ease both;
+
+	@media (max-width: 1024px) {
+		padding: 22px;
+	}
 
 	&::after {
 		content: '';
