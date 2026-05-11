@@ -1,4 +1,4 @@
-.PHONY: build go-build test web-build
+.PHONY: build go-build test web-dev web-build
 
 build: go-build
 
@@ -7,6 +7,9 @@ go-build: web-build
 
 test: web-build
 	go test ./...
+
+web-dev:
+	pnpm --dir web dev
 
 web-build:
 	pnpm --dir web build
