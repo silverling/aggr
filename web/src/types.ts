@@ -36,20 +36,37 @@ export interface ProxyRequestLogView {
 	providerId?: number
 	providerName?: string
 	modelId?: string
-	method: string
-	path: string
-	rawQuery?: string
-	requestHeaders: string
-	requestBody?: string
-	requestBodyTruncated: boolean
-	responseStatus?: number
-	responseHeaders?: string
-	responseBody?: string
-	responseBodyTruncated: boolean
-	error?: string
+	receivedRequest: ProxyRequestReceivedRequestView
+	sentRequest?: ProxyRequestSentRequestView
+	receivedResponse: ProxyRequestReceivedResponseView
 	durationMs?: number
 	requestedAt: string
 	completedAt?: string
+}
+
+export interface ProxyRequestReceivedRequestView {
+	method: string
+	path: string
+	rawQuery?: string
+	headers: string
+	body?: string
+	bodyTruncated: boolean
+}
+
+export interface ProxyRequestSentRequestView {
+	method: string
+	url: string
+	headers: string
+	body?: string
+	bodyTruncated: boolean
+}
+
+export interface ProxyRequestReceivedResponseView {
+	status?: number
+	headers?: string
+	body?: string
+	bodyTruncated: boolean
+	error?: string
 }
 
 export interface ProxyRequestsPayload {

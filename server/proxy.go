@@ -53,6 +53,60 @@ type flushingWriter struct {
 	flusher http.Flusher
 }
 
+// proxyRequestSentCapture stores the exact upstream request that the gateway
+// sent while proxying one OpenAI call.
+type proxyRequestSentCapture struct {
+	// Method is the outbound HTTP verb sent upstream.
+	Method string
+	// URL is the exact upstream URL that the gateway called.
+	URL string
+	// HeadersJSON stores the sanitized outbound headers as JSON.
+	HeadersJSON string
+	// Body stores a capped copy of the outbound request body.
+	Body string
+	// BodyTruncated reports whether the stored request body preview was shortened.
+	BodyTruncated bool
+}
+
+// capturingRoundTripper records the outbound request before handing it to the
+// real transport, which lets the audit trail show the exact sent payload.
+type capturingRoundTripper struct {
+	// base is the underlying transport used to send the upstream request.
+	base http.RoundTripper
+	// capture receives the request snapshot for the audit log.
+	capture *proxyRequestSentCapture
+}
+
+// RoundTrip records the outbound request snapshot and forwards the request to
+// the wrapped transport.
+func (roundTripper *capturingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if roundTripper.capture != nil {
+		roundTripper.capture.Method = req.Method
+		roundTripper.capture.URL = req.URL.String()
+		roundTripper.capture.HeadersJSON = headersToAuditJSON(req.Header)
+	}
+
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("capture upstream request body: %w", err)
+		}
+
+		if roundTripper.capture != nil {
+			roundTripper.capture.Body, roundTripper.capture.BodyTruncated = truncateAuditBytes(body)
+		}
+
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+	}
+
+	if roundTripper.base == nil {
+		roundTripper.base = http.DefaultTransport
+	}
+
+	return roundTripper.base.RoundTrip(req)
+}
+
 // Write forwards the bytes to the client and immediately flushes them so
 // streamed provider responses remain responsive.
 func (writer *flushingWriter) Write(p []byte) (int, error) {
@@ -365,30 +419,36 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	logID := s.createProxyRequestAudit(auditContext, r, modelID, body)
 	if err != nil {
 		if errors.Is(err, errModelHintMissing) {
-			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusBadRequest, "requests under /v1 must include a model field or target /v1/models/{id}")
+			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusBadRequest, "requests under /v1 must include a model field or target /v1/models/{id}")
 			return
 		}
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusBadRequest, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	provider, err := s.store.findProviderForModel(r.Context(), modelID)
 	if err != nil {
 		if errors.Is(err, errProviderNotFound) {
-			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusNotFound, fmt.Sprintf("no enabled provider serves model %q", modelID))
+			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusNotFound, fmt.Sprintf("no enabled provider serves model %q", modelID))
 			return
 		}
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusInternalServerError, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	path, err := resolveProviderPath(provider.BaseURL, r.URL.Path)
 	if err != nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, http.StatusBadGateway, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, nil, http.StatusBadGateway, err.Error())
 		return
 	}
 
-	client := s.newProviderClient(provider, s.proxyClient)
+	sentRequest := proxyRequestSentCapture{}
+	proxyClient := *s.proxyClient
+	proxyClient.Transport = &capturingRoundTripper{
+		base:    proxyClient.Transport,
+		capture: &sentRequest,
+	}
+	client := s.newProviderClient(provider, &proxyClient)
 	options := buildProviderRequestOptions(r.Header, r.URL.Query())
 
 	var requestBody any
@@ -399,11 +459,11 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	var response *http.Response
 	err = client.Execute(r.Context(), r.Method, path, requestBody, &response, options...)
 	if err != nil && response == nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, http.StatusBadGateway, fmt.Sprintf("upstream request failed: %v", err))
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, &sentRequest, http.StatusBadGateway, fmt.Sprintf("upstream request failed: %v", err))
 		return
 	}
 	if response == nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, http.StatusBadGateway, "upstream request returned no response")
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, &sentRequest, http.StatusBadGateway, "upstream request returned no response")
 		return
 	}
 
@@ -421,6 +481,11 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.completeProxyRequestAudit(auditContext, logID, proxyRequestLogUpdate{
+		SentMethod:            sentRequest.Method,
+		SentURL:               sentRequest.URL,
+		SentHeaders:           sentRequest.HeadersJSON,
+		SentBody:              sentRequest.Body,
+		SentBodyTruncated:     sentRequest.BodyTruncated,
 		ProviderID:            &provider.ID,
 		ProviderName:          provider.Name,
 		ResponseStatus:        capture.StatusCode,

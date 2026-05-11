@@ -347,13 +347,13 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 
 	models, err := s.store.listRouteModels(r.Context())
 	if err != nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusInternalServerError, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	body, err := encodeJSONPayload(toOpenAIModels(models))
 	if err != nil {
-		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusInternalServerError, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusInternalServerError, err.Error())
 		return
 	}
 

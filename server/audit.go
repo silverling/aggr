@@ -117,7 +117,7 @@ func (s *server) completeProxyRequestAudit(ctx context.Context, logID int64, upd
 
 // writeLoggedProxyError writes a JSON error response to the caller and records
 // the same payload in the audit log with the matching HTTP status code.
-func (s *server) writeLoggedProxyError(w http.ResponseWriter, ctx context.Context, logID int64, startedAt time.Time, provider *providerRecord, status int, message string) {
+func (s *server) writeLoggedProxyError(w http.ResponseWriter, ctx context.Context, logID int64, startedAt time.Time, provider *providerRecord, sentRequest *proxyRequestSentCapture, status int, message string) {
 	body, err := encodeJSONPayload(map[string]string{
 		"error": message,
 	})
@@ -134,6 +134,13 @@ func (s *server) writeLoggedProxyError(w http.ResponseWriter, ctx context.Contex
 		ErrorText:             message,
 		DurationMS:            time.Since(startedAt).Milliseconds(),
 		CompletedAt:           time.Now(),
+	}
+	if sentRequest != nil {
+		update.SentMethod = sentRequest.Method
+		update.SentURL = sentRequest.URL
+		update.SentHeaders = sentRequest.HeadersJSON
+		update.SentBody = sentRequest.Body
+		update.SentBodyTruncated = sentRequest.BodyTruncated
 	}
 	if provider != nil {
 		update.ProviderID = &provider.ID

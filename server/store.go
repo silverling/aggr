@@ -78,6 +78,53 @@ type routeModelView struct {
 	Providers []routeProviderView `json:"providers"`
 }
 
+// proxyRequestReceivedRequestView is the received-request section exposed by
+// the audit API and rendered in the UI.
+type proxyRequestReceivedRequestView struct {
+	// Method is the incoming HTTP verb.
+	Method string `json:"method"`
+	// Path is the incoming request path.
+	Path string `json:"path"`
+	// RawQuery is the incoming request query string.
+	RawQuery string `json:"rawQuery,omitempty"`
+	// Headers stores the sanitized inbound headers as JSON.
+	Headers string `json:"headers"`
+	// Body stores a capped copy of the inbound request body.
+	Body string `json:"body,omitempty"`
+	// BodyTruncated reports whether the stored request body preview was shortened.
+	BodyTruncated bool `json:"bodyTruncated"`
+}
+
+// proxyRequestSentRequestView is the sent-request section exposed by the audit
+// API and rendered in the UI.
+type proxyRequestSentRequestView struct {
+	// Method is the outbound HTTP verb sent upstream.
+	Method string `json:"method"`
+	// URL is the exact upstream URL that the gateway called.
+	URL string `json:"url"`
+	// Headers stores the sanitized outbound headers as JSON.
+	Headers string `json:"headers"`
+	// Body stores a capped copy of the outbound request body.
+	Body string `json:"body,omitempty"`
+	// BodyTruncated reports whether the stored request body preview was shortened.
+	BodyTruncated bool `json:"bodyTruncated"`
+}
+
+// proxyRequestReceivedResponseView is the received-response section exposed by
+// the audit API and rendered in the UI.
+type proxyRequestReceivedResponseView struct {
+	// Status is the HTTP status returned by the upstream provider or gateway.
+	Status int `json:"status,omitempty"`
+	// Headers stores the final response headers as JSON.
+	Headers string `json:"headers,omitempty"`
+	// Body stores a capped copy of the final response body.
+	Body string `json:"body,omitempty"`
+	// BodyTruncated reports whether the stored response body preview was shortened.
+	BodyTruncated bool `json:"bodyTruncated"`
+	// Error stores the final error message, if the request failed.
+	Error string `json:"error,omitempty"`
+}
+
 // proxyRequestLogRecord is the internal database representation of one audited
 // gateway request and its recorded upstream response.
 type proxyRequestLogRecord struct {
@@ -101,6 +148,16 @@ type proxyRequestLogRecord struct {
 	RequestBody string
 	// RequestBodyTruncated reports whether the stored request body preview was shortened.
 	RequestBodyTruncated bool
+	// SentMethod is the outbound HTTP verb sent upstream.
+	SentMethod string
+	// SentURL is the exact upstream URL that the gateway called.
+	SentURL string
+	// SentHeaders stores the sanitized outbound headers as JSON.
+	SentHeaders string
+	// SentBody stores a capped copy of the outbound request body.
+	SentBody string
+	// SentBodyTruncated reports whether the stored request body preview was shortened.
+	SentBodyTruncated bool
 	// ResponseStatus is the final status code returned to the caller.
 	ResponseStatus sql.NullInt64
 	// ResponseHeaders stores the final response headers as JSON.
@@ -129,28 +186,12 @@ type proxyRequestLogView struct {
 	ProviderName string `json:"providerName,omitempty"`
 	// ModelID is the OpenAI model identifier that routed the request.
 	ModelID string `json:"modelId,omitempty"`
-	// Method is the inbound HTTP method.
-	Method string `json:"method"`
-	// Path is the inbound request path.
-	Path string `json:"path"`
-	// RawQuery is the raw query string from the inbound request.
-	RawQuery string `json:"rawQuery,omitempty"`
-	// RequestHeaders stores the sanitized inbound headers as JSON.
-	RequestHeaders string `json:"requestHeaders"`
-	// RequestBody stores a capped copy of the inbound body.
-	RequestBody string `json:"requestBody,omitempty"`
-	// RequestBodyTruncated reports whether the stored request body preview was shortened.
-	RequestBodyTruncated bool `json:"requestBodyTruncated"`
-	// ResponseStatus is the final status code returned to the caller.
-	ResponseStatus int `json:"responseStatus,omitempty"`
-	// ResponseHeaders stores the final response headers as JSON.
-	ResponseHeaders string `json:"responseHeaders,omitempty"`
-	// ResponseBody stores a capped copy of the final response body.
-	ResponseBody string `json:"responseBody,omitempty"`
-	// ResponseBodyTruncated reports whether the stored response body preview was shortened.
-	ResponseBodyTruncated bool `json:"responseBodyTruncated"`
-	// ErrorText stores the final error message, if the request failed.
-	ErrorText string `json:"error,omitempty"`
+	// ReceivedRequest contains the inbound request details from the caller.
+	ReceivedRequest proxyRequestReceivedRequestView `json:"receivedRequest"`
+	// SentRequest contains the upstream request details when the gateway proxied the call.
+	SentRequest *proxyRequestSentRequestView `json:"sentRequest,omitempty"`
+	// ReceivedResponse contains the upstream response details or the final gateway error.
+	ReceivedResponse proxyRequestReceivedResponseView `json:"receivedResponse"`
 	// DurationMS stores the elapsed time in milliseconds.
 	DurationMS int64 `json:"durationMs,omitempty"`
 	// RequestedAt records when the request log row was created.
@@ -180,9 +221,19 @@ type proxyRequestLogCreate struct {
 	RequestedAt time.Time
 }
 
-// proxyRequestLogUpdate captures the response-side fields written when a log row
-// is finalized.
+// proxyRequestLogUpdate captures the sent-request and response-side fields
+// written when a log row is finalized.
 type proxyRequestLogUpdate struct {
+	// SentMethod is the outbound HTTP verb sent upstream.
+	SentMethod string
+	// SentURL is the exact upstream URL that the gateway called.
+	SentURL string
+	// SentHeaders stores the sanitized outbound headers as JSON.
+	SentHeaders string
+	// SentBody stores a capped copy of the outbound request body.
+	SentBody string
+	// SentBodyTruncated reports whether the stored request body preview was shortened.
+	SentBodyTruncated bool
 	// ProviderID is the selected provider, if any.
 	ProviderID *int64
 	// ProviderName is the provider label captured at request time.
@@ -262,6 +313,11 @@ func (s *store) migrate(ctx context.Context) error {
 			request_headers TEXT NOT NULL,
 			request_body TEXT NOT NULL,
 			request_body_truncated INTEGER NOT NULL DEFAULT 0,
+			sent_request_method TEXT NOT NULL DEFAULT '',
+			sent_request_url TEXT NOT NULL DEFAULT '',
+			sent_request_headers TEXT NOT NULL DEFAULT '',
+			sent_request_body TEXT NOT NULL DEFAULT '',
+			sent_request_body_truncated INTEGER NOT NULL DEFAULT 0,
 			response_status INTEGER,
 			response_headers TEXT,
 			response_body TEXT,
@@ -283,6 +339,9 @@ func (s *store) migrate(ctx context.Context) error {
 	}
 
 	if err := s.ensureProviderUserAgentColumn(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureProxyRequestSentRequestColumns(ctx); err != nil {
 		return err
 	}
 
@@ -320,6 +379,79 @@ func (s *store) ensureProviderUserAgentColumn(ctx context.Context) error {
 
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE providers ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("add provider user_agent column: %w", err)
+	}
+
+	return nil
+}
+
+// ensureProxyRequestSentRequestColumns adds the sent-request audit columns when
+// migrating a database created before the field existed.
+func (s *store) ensureProxyRequestSentRequestColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(proxy_request_logs)`)
+	if err != nil {
+		return fmt.Errorf("inspect proxy request log schema: %w", err)
+	}
+	defer rows.Close()
+
+	hasSentMethod := false
+	hasSentURL := false
+	hasSentHeaders := false
+	hasSentBody := false
+	hasSentBodyTruncated := false
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return fmt.Errorf("scan proxy request log schema: %w", err)
+		}
+		switch name {
+		case "sent_request_method":
+			hasSentMethod = true
+		case "sent_request_url":
+			hasSentURL = true
+		case "sent_request_headers":
+			hasSentHeaders = true
+		case "sent_request_body":
+			hasSentBody = true
+		case "sent_request_body_truncated":
+			hasSentBodyTruncated = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate proxy request log schema: %w", err)
+	}
+
+	if !hasSentMethod {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN sent_request_method TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add proxy request sent_method column: %w", err)
+		}
+	}
+	if !hasSentURL {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN sent_request_url TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add proxy request sent_url column: %w", err)
+		}
+	}
+	if !hasSentHeaders {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN sent_request_headers TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add proxy request sent_headers column: %w", err)
+		}
+	}
+	if !hasSentBody {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN sent_request_body TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add proxy request sent_body column: %w", err)
+		}
+	}
+	if !hasSentBodyTruncated {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN sent_request_body_truncated INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add proxy request sent_body_truncated column: %w", err)
+		}
 	}
 
 	return nil
@@ -493,10 +625,11 @@ func (s *store) createProxyRequestLog(ctx context.Context, entry proxyRequestLog
 func (s *store) completeProxyRequestLog(ctx context.Context, id int64, update proxyRequestLogUpdate) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE proxy_request_logs
-		SET provider_id = ?, provider_name = ?, response_status = ?, response_headers = ?, response_body = ?,
+		SET provider_id = ?, provider_name = ?, sent_request_method = ?, sent_request_url = ?, sent_request_headers = ?, sent_request_body = ?, sent_request_body_truncated = ?,
+			response_status = ?, response_headers = ?, response_body = ?,
 			response_body_truncated = ?, error_text = ?, duration_ms = ?, completed_at = ?
 		WHERE id = ?
-	`, nullableInt64(update.ProviderID), update.ProviderName, update.ResponseStatus, update.ResponseHeaders, update.ResponseBody, boolToInt(update.ResponseBodyTruncated), update.ErrorText, update.DurationMS, update.CompletedAt.UTC().Format(time.RFC3339), id)
+	`, nullableInt64(update.ProviderID), update.ProviderName, update.SentMethod, update.SentURL, update.SentHeaders, update.SentBody, boolToInt(update.SentBodyTruncated), update.ResponseStatus, update.ResponseHeaders, update.ResponseBody, boolToInt(update.ResponseBodyTruncated), update.ErrorText, update.DurationMS, update.CompletedAt.UTC().Format(time.RFC3339), id)
 	if err != nil {
 		return fmt.Errorf("update proxy request log: %w", err)
 	}
@@ -550,6 +683,7 @@ func (s *store) listProxyRequestLogs(ctx context.Context, limit int) ([]proxyReq
 		SELECT
 			id, provider_id, provider_name, model_id, method, path, raw_query,
 			request_headers, request_body, request_body_truncated,
+			sent_request_method, sent_request_url, sent_request_headers, sent_request_body, sent_request_body_truncated,
 			response_status, response_headers, response_body, response_body_truncated,
 			error_text, duration_ms, requested_at, completed_at
 		FROM proxy_request_logs
@@ -783,6 +917,7 @@ func scanProxyRequestLog(scanner interface {
 	var record proxyRequestLogRecord
 	var (
 		requestBodyTruncated  int
+		sentBodyTruncated     int
 		responseStatus        sql.NullInt64
 		responseBodyTruncated int
 		durationMS            sql.NullInt64
@@ -801,6 +936,11 @@ func scanProxyRequestLog(scanner interface {
 		&record.RequestHeaders,
 		&record.RequestBody,
 		&requestBodyTruncated,
+		&record.SentMethod,
+		&record.SentURL,
+		&record.SentHeaders,
+		&record.SentBody,
+		&sentBodyTruncated,
 		&responseStatus,
 		&record.ResponseHeaders,
 		&record.ResponseBody,
@@ -814,6 +954,7 @@ func scanProxyRequestLog(scanner interface {
 	}
 
 	record.RequestBodyTruncated = requestBodyTruncated == 1
+	record.SentBodyTruncated = sentBodyTruncated == 1
 	record.ResponseStatus = responseStatus
 	record.ResponseBodyTruncated = responseBodyTruncated == 1
 	record.DurationMS = durationMS
@@ -910,26 +1051,39 @@ func (p providerRecord) toView() providerView {
 // toView converts the internal audit record into the JSON payload used by the UI.
 func (record proxyRequestLogRecord) toView() proxyRequestLogView {
 	view := proxyRequestLogView{
-		ID:                    record.ID,
-		ProviderName:          record.ProviderName,
-		ModelID:               record.ModelID,
-		Method:                record.Method,
-		Path:                  record.Path,
-		RawQuery:              record.RawQuery,
-		RequestHeaders:        record.RequestHeaders,
-		RequestBody:           record.RequestBody,
-		RequestBodyTruncated:  record.RequestBodyTruncated,
-		ResponseHeaders:       record.ResponseHeaders,
-		ResponseBody:          record.ResponseBody,
-		ResponseBodyTruncated: record.ResponseBodyTruncated,
-		ErrorText:             record.ErrorText,
-		RequestedAt:           record.RequestedAt.UTC().Format(time.RFC3339),
+		ID:           record.ID,
+		ProviderName: record.ProviderName,
+		ModelID:      record.ModelID,
+		ReceivedRequest: proxyRequestReceivedRequestView{
+			Method:        record.Method,
+			Path:          record.Path,
+			RawQuery:      record.RawQuery,
+			Headers:       record.RequestHeaders,
+			Body:          record.RequestBody,
+			BodyTruncated: record.RequestBodyTruncated,
+		},
+		ReceivedResponse: proxyRequestReceivedResponseView{
+			Headers:       record.ResponseHeaders,
+			Body:          record.ResponseBody,
+			BodyTruncated: record.ResponseBodyTruncated,
+			Error:         record.ErrorText,
+		},
+		RequestedAt: record.RequestedAt.UTC().Format(time.RFC3339),
 	}
 	if record.ProviderID.Valid {
 		view.ProviderID = record.ProviderID.Int64
 	}
+	if record.SentMethod != "" || record.SentURL != "" || record.SentHeaders != "" || record.SentBody != "" || record.SentBodyTruncated {
+		view.SentRequest = &proxyRequestSentRequestView{
+			Method:        record.SentMethod,
+			URL:           record.SentURL,
+			Headers:       record.SentHeaders,
+			Body:          record.SentBody,
+			BodyTruncated: record.SentBodyTruncated,
+		}
+	}
 	if record.ResponseStatus.Valid {
-		view.ResponseStatus = int(record.ResponseStatus.Int64)
+		view.ReceivedResponse.Status = int(record.ResponseStatus.Int64)
 	}
 	if record.DurationMS.Valid {
 		view.DurationMS = record.DurationMS.Int64

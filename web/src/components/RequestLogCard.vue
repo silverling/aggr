@@ -12,7 +12,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 })
 
 const statusClass = computed(() => {
-	const status = props.requestLog.responseStatus
+	const status = props.requestLog.receivedResponse.status
 	if (status === undefined) {
 		return 'border border-line bg-surface-muted text-ink-soft'
 	}
@@ -64,10 +64,10 @@ function formatBody(value?: string, truncated?: boolean) {
 						<span
 							class="inline-flex items-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-3 py-1.5 font-mono text-[0.78rem] font-bold uppercase tracking-[0.18em] text-ink-strong"
 						>
-							{{ props.requestLog.method }}
+							{{ props.requestLog.receivedRequest.method }}
 						</span>
 						<code class="wrap-break-word text-[0.92rem] text-ink-strong">{{
-							formatPath(props.requestLog.path, props.requestLog.rawQuery)
+							formatPath(props.requestLog.receivedRequest.path, props.requestLog.receivedRequest.rawQuery)
 						}}</code>
 					</div>
 
@@ -86,56 +86,92 @@ function formatBody(value?: string, truncated?: boolean) {
 						statusClass,
 					]"
 				>
-					{{ props.requestLog.responseStatus ?? 'Pending' }}
+					{{ props.requestLog.receivedResponse.status ?? 'Pending' }}
 				</span>
 			</div>
 		</summary>
 
 		<div class="mt-4 grid gap-4 border-t border-line pt-4">
-			<p v-if="props.requestLog.error" class="rounded-[14px] bg-danger-soft px-3.5 py-3 leading-[1.55] text-danger">
-				{{ props.requestLog.error }}
+			<p v-if="props.requestLog.receivedResponse.error" class="rounded-[14px] bg-danger-soft px-3.5 py-3 leading-[1.55] text-danger">
+				{{ props.requestLog.receivedResponse.error }}
 			</p>
 
-			<div class="grid gap-4 lg:grid-cols-2">
-				<section data-anchor="request-log-request" class="grid gap-3 rounded-[18px] border border-line bg-surface p-4">
+			<div class="grid gap-4 xl:grid-cols-3">
+				<section data-anchor="request-log-received-request" class="grid gap-3 rounded-[18px] border border-line bg-surface p-4">
 					<div>
 						<p class="mb-1 text-xs font-bold uppercase tracking-[0.1em] text-accent">Request</p>
-						<h3>Inbound payload</h3>
+						<h3>Received request</h3>
 					</div>
+
+					<code class="wrap-break-word rounded-[16px] border border-line bg-white/70 px-3.5 py-3 text-[0.84rem] text-ink">{{
+						formatPath(props.requestLog.receivedRequest.path, props.requestLog.receivedRequest.rawQuery)
+					}}</code>
 
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Headers</span>
 						<pre
 							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ props.requestLog.requestHeaders }}</code></pre>
+						><code>{{ props.requestLog.receivedRequest.headers }}</code></pre>
 					</div>
 
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Body</span>
 						<pre
 							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ formatBody(props.requestLog.requestBody, props.requestLog.requestBodyTruncated) }}</code></pre>
+						><code>{{ formatBody(props.requestLog.receivedRequest.body, props.requestLog.receivedRequest.bodyTruncated) }}</code></pre>
 					</div>
 				</section>
 
-				<section data-anchor="request-log-response" class="grid gap-3 rounded-[18px] border border-line bg-surface p-4">
+				<section data-anchor="request-log-sent-request" class="grid gap-3 rounded-[18px] border border-line bg-surface p-4">
+					<div>
+						<p class="mb-1 text-xs font-bold uppercase tracking-[0.1em] text-accent">Request</p>
+						<h3>Sent request</h3>
+					</div>
+
+					<template v-if="props.requestLog.sentRequest">
+						<code class="wrap-break-word rounded-[16px] border border-line bg-white/70 px-3.5 py-3 text-[0.84rem] text-ink"
+							>{{ props.requestLog.sentRequest.method }} {{ props.requestLog.sentRequest.url }}</code
+						>
+
+						<div class="grid gap-2">
+							<span class="text-sm font-bold text-ink-strong">Headers</span>
+							<pre
+								class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+							><code>{{ props.requestLog.sentRequest.headers }}</code></pre>
+						</div>
+
+						<div class="grid gap-2">
+							<span class="text-sm font-bold text-ink-strong">Body</span>
+							<pre
+								class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+							><code>{{ formatBody(props.requestLog.sentRequest.body, props.requestLog.sentRequest.bodyTruncated) }}</code></pre>
+						</div>
+					</template>
+					<p v-else class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft">
+						No upstream request was sent for this record.
+					</p>
+				</section>
+
+				<section data-anchor="request-log-received-response" class="grid gap-3 rounded-[18px] border border-line bg-surface p-4">
 					<div>
 						<p class="mb-1 text-xs font-bold uppercase tracking-[0.1em] text-accent">Response</p>
-						<h3>Returned payload</h3>
+						<h3>Received response</h3>
 					</div>
+
+					<span class="text-sm font-bold text-ink-strong">Status {{ props.requestLog.receivedResponse.status ?? 'Pending' }}</span>
 
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Headers</span>
 						<pre
 							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ formatBody(props.requestLog.responseHeaders) }}</code></pre>
+						><code>{{ formatBody(props.requestLog.receivedResponse.headers) }}</code></pre>
 					</div>
 
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Body</span>
 						<pre
 							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ formatBody(props.requestLog.responseBody, props.requestLog.responseBodyTruncated) }}</code></pre>
+						><code>{{ formatBody(props.requestLog.receivedResponse.body, props.requestLog.receivedResponse.bodyTruncated) }}</code></pre>
 					</div>
 				</section>
 			</div>

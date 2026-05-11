@@ -38,6 +38,53 @@ type testProxyRequestsResponse struct {
 	Requests []testProxyRequestLog `json:"requests"`
 }
 
+// testProxyRequestReceivedRequest mirrors the inbound request section in the
+// request-log payload.
+type testProxyRequestReceivedRequest struct {
+	// Method is the inbound HTTP verb.
+	Method string `json:"method"`
+	// Path is the inbound request path.
+	Path string `json:"path"`
+	// RawQuery is the inbound request query string.
+	RawQuery string `json:"rawQuery,omitempty"`
+	// Headers stores the sanitized inbound headers as JSON.
+	Headers string `json:"headers"`
+	// Body stores the captured inbound body preview.
+	Body string `json:"body,omitempty"`
+	// BodyTruncated reports whether the stored request body preview was shortened.
+	BodyTruncated bool `json:"bodyTruncated"`
+}
+
+// testProxyRequestSentRequest mirrors the upstream request section in the
+// request-log payload.
+type testProxyRequestSentRequest struct {
+	// Method is the outbound HTTP verb.
+	Method string `json:"method"`
+	// URL is the exact upstream URL the gateway called.
+	URL string `json:"url"`
+	// Headers stores the sanitized outbound headers as JSON.
+	Headers string `json:"headers"`
+	// Body stores the captured outbound body preview.
+	Body string `json:"body,omitempty"`
+	// BodyTruncated reports whether the stored request body preview was shortened.
+	BodyTruncated bool `json:"bodyTruncated"`
+}
+
+// testProxyRequestReceivedResponse mirrors the response section in the
+// request-log payload.
+type testProxyRequestReceivedResponse struct {
+	// Status is the final HTTP status returned to the caller.
+	Status int `json:"status,omitempty"`
+	// Headers stores the serialized response headers captured by the gateway.
+	Headers string `json:"headers,omitempty"`
+	// Body stores the response payload captured by the gateway.
+	Body string `json:"body,omitempty"`
+	// BodyTruncated reports whether the stored response body preview was shortened.
+	BodyTruncated bool `json:"bodyTruncated"`
+	// Error stores the final error message when the request fails.
+	Error string `json:"error,omitempty"`
+}
+
 // testProxyRequestLog mirrors the request-log fields asserted by the integration test.
 type testProxyRequestLog struct {
 	// ID is the audit row identifier.
@@ -48,18 +95,12 @@ type testProxyRequestLog struct {
 	ProviderName string `json:"providerName,omitempty"`
 	// ModelID is the OpenAI model identifier used for routing.
 	ModelID string `json:"modelId,omitempty"`
-	// Method is the inbound HTTP verb.
-	Method string `json:"method"`
-	// Path is the inbound request path.
-	Path string `json:"path"`
-	// RequestBody stores the request payload captured by the gateway.
-	RequestBody string `json:"requestBody,omitempty"`
-	// ResponseStatus is the final status returned to the caller.
-	ResponseStatus int `json:"responseStatus,omitempty"`
-	// ResponseHeaders stores the serialized response headers captured by the gateway.
-	ResponseHeaders string `json:"responseHeaders,omitempty"`
-	// ResponseBody stores the response payload captured by the gateway.
-	ResponseBody string `json:"responseBody,omitempty"`
+	// ReceivedRequest stores the inbound request details.
+	ReceivedRequest testProxyRequestReceivedRequest `json:"receivedRequest"`
+	// SentRequest stores the upstream request details when the gateway proxied the call.
+	SentRequest *testProxyRequestSentRequest `json:"sentRequest,omitempty"`
+	// ReceivedResponse stores the final response details returned to the caller.
+	ReceivedResponse testProxyRequestReceivedResponse `json:"receivedResponse"`
 	// RequestedAt records when the request arrived at the gateway.
 	RequestedAt string `json:"requestedAt"`
 }
@@ -151,8 +192,8 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 
 	chatLog := logsPayload.Requests[0]
-	if chatLog.Path != "/v1/chat/completions" {
-		t.Fatalf("chat request path = %q, want %q", chatLog.Path, "/v1/chat/completions")
+	if chatLog.ReceivedRequest.Path != "/v1/chat/completions" {
+		t.Fatalf("chat request path = %q, want %q", chatLog.ReceivedRequest.Path, "/v1/chat/completions")
 	}
 	if chatLog.ModelID != "gpt-4.1" {
 		t.Fatalf("chat request model = %q, want %q", chatLog.ModelID, "gpt-4.1")
@@ -163,28 +204,46 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	if chatLog.ProviderName != "Primary" {
 		t.Fatalf("chat request provider name = %q, want %q", chatLog.ProviderName, "Primary")
 	}
-	if chatLog.ResponseStatus != http.StatusOK {
-		t.Fatalf("chat response status = %d, want %d", chatLog.ResponseStatus, http.StatusOK)
+	if chatLog.SentRequest == nil {
+		t.Fatalf("chat sent request = nil, want populated request snapshot")
 	}
-	if !strings.Contains(chatLog.RequestBody, `"model":"gpt-4.1"`) {
-		t.Fatalf("chat request body = %q, expected model hint", chatLog.RequestBody)
+	if chatLog.SentRequest.Method != http.MethodPost {
+		t.Fatalf("chat sent request method = %q, want %q", chatLog.SentRequest.Method, http.MethodPost)
 	}
-	if !strings.Contains(chatLog.ResponseHeaders, "X-Aggr-Provider") {
-		t.Fatalf("chat response headers = %q, expected X-Aggr-Provider", chatLog.ResponseHeaders)
+	if !strings.Contains(chatLog.SentRequest.URL, "/v1/chat/completions") {
+		t.Fatalf("chat sent request url = %q, expected upstream chat path", chatLog.SentRequest.URL)
 	}
-	if !strings.Contains(chatLog.ResponseBody, `"object":"chat.completion"`) {
-		t.Fatalf("chat response body = %q, expected completion payload", chatLog.ResponseBody)
+	if !strings.Contains(chatLog.SentRequest.Headers, userAgent) {
+		t.Fatalf("chat sent request headers = %q, expected upstream user agent", chatLog.SentRequest.Headers)
+	}
+	if !strings.Contains(chatLog.SentRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("chat sent request body = %q, expected model hint", chatLog.SentRequest.Body)
+	}
+	if chatLog.ReceivedResponse.Status != http.StatusOK {
+		t.Fatalf("chat response status = %d, want %d", chatLog.ReceivedResponse.Status, http.StatusOK)
+	}
+	if !strings.Contains(chatLog.ReceivedRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("chat request body = %q, expected model hint", chatLog.ReceivedRequest.Body)
+	}
+	if !strings.Contains(chatLog.ReceivedResponse.Headers, "X-Aggr-Provider") {
+		t.Fatalf("chat response headers = %q, expected X-Aggr-Provider", chatLog.ReceivedResponse.Headers)
+	}
+	if !strings.Contains(chatLog.ReceivedResponse.Body, `"object":"chat.completion"`) {
+		t.Fatalf("chat response body = %q, expected completion payload", chatLog.ReceivedResponse.Body)
 	}
 
 	modelsLog := logsPayload.Requests[1]
-	if modelsLog.Path != "/v1/models" {
-		t.Fatalf("models request path = %q, want %q", modelsLog.Path, "/v1/models")
+	if modelsLog.ReceivedRequest.Path != "/v1/models" {
+		t.Fatalf("models request path = %q, want %q", modelsLog.ReceivedRequest.Path, "/v1/models")
 	}
 	if modelsLog.ProviderID != nil {
 		t.Fatalf("models request provider id = %v, want nil", modelsLog.ProviderID)
 	}
-	if !strings.Contains(modelsLog.ResponseBody, `"object":"list"`) {
-		t.Fatalf("models response body = %q, expected aggregated models payload", modelsLog.ResponseBody)
+	if modelsLog.SentRequest != nil {
+		t.Fatalf("models sent request = %#v, want nil", modelsLog.SentRequest)
+	}
+	if !strings.Contains(modelsLog.ReceivedResponse.Body, `"object":"list"`) {
+		t.Fatalf("models response body = %q, expected aggregated models payload", modelsLog.ReceivedResponse.Body)
 	}
 
 	var providerDeletePayload testDeleteProxyRequestsResponse
@@ -205,8 +264,8 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	if len(logsPayload.Requests) != 1 {
 		t.Fatalf("expected 1 request log after provider delete, got %d", len(logsPayload.Requests))
 	}
-	if logsPayload.Requests[0].Path != "/v1/models" {
-		t.Fatalf("remaining request path = %q, want %q", logsPayload.Requests[0].Path, "/v1/models")
+	if logsPayload.Requests[0].ReceivedRequest.Path != "/v1/models" {
+		t.Fatalf("remaining request path = %q, want %q", logsPayload.Requests[0].ReceivedRequest.Path, "/v1/models")
 	}
 
 	modelsRequestedAt := logsPayload.Requests[0].RequestedAt
