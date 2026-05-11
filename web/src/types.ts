@@ -29,3 +29,32 @@ export interface ProvidersPayload {
 export interface ModelsPayload {
 	models: ModelRoute[]
 }
+
+export interface ProxyRequestLogView {
+	id: number
+	providerId?: number
+	providerName?: string
+	modelId?: string
+	method: string
+	path: string
+	rawQuery?: string
+	requestHeaders: string
+	requestBody?: string
+	requestBodyTruncated: boolean
+	responseStatus?: number
+	responseHeaders?: string
+	responseBody?: string
+	responseBodyTruncated: boolean
+	error?: string
+	durationMs?: number
+	requestedAt: string
+	completedAt?: string
+}
+
+export interface ProxyRequestsPayload {
+	requests: ProxyRequestLogView[]
+}
+
+export interface DeleteProxyRequestsPayload {
+	deleted: number
+}

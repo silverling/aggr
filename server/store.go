@@ -74,6 +74,131 @@ type routeModelView struct {
 	Providers []routeProviderView `json:"providers"`
 }
 
+// proxyRequestLogRecord is the internal database representation of one audited
+// gateway request and its recorded upstream response.
+type proxyRequestLogRecord struct {
+	// ID is the audit row primary key.
+	ID int64
+	// ProviderID is the provider selected for the request, if any.
+	ProviderID sql.NullInt64
+	// ProviderName is the provider label captured at request time.
+	ProviderName string
+	// ModelID is the OpenAI model identifier that routed the request.
+	ModelID string
+	// Method is the inbound HTTP method.
+	Method string
+	// Path is the inbound request path.
+	Path string
+	// RawQuery is the raw query string from the inbound request.
+	RawQuery string
+	// RequestHeaders stores the sanitized inbound headers as JSON.
+	RequestHeaders string
+	// RequestBody stores a capped copy of the inbound body.
+	RequestBody string
+	// RequestBodyTruncated reports whether the stored request body preview was shortened.
+	RequestBodyTruncated bool
+	// ResponseStatus is the final status code returned to the caller.
+	ResponseStatus sql.NullInt64
+	// ResponseHeaders stores the final response headers as JSON.
+	ResponseHeaders string
+	// ResponseBody stores a capped copy of the final response body.
+	ResponseBody string
+	// ResponseBodyTruncated reports whether the stored response body preview was shortened.
+	ResponseBodyTruncated bool
+	// ErrorText stores the final error message, if the request failed.
+	ErrorText string
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS sql.NullInt64
+	// RequestedAt records when the request log row was created.
+	RequestedAt time.Time
+	// CompletedAt records when the request log row was finalized.
+	CompletedAt sql.NullTime
+}
+
+// proxyRequestLogView is the JSON payload returned to the dashboard inspector.
+type proxyRequestLogView struct {
+	// ID is the audit row primary key.
+	ID int64 `json:"id"`
+	// ProviderID is the provider selected for the request, if any.
+	ProviderID int64 `json:"providerId,omitempty"`
+	// ProviderName is the provider label captured at request time.
+	ProviderName string `json:"providerName,omitempty"`
+	// ModelID is the OpenAI model identifier that routed the request.
+	ModelID string `json:"modelId,omitempty"`
+	// Method is the inbound HTTP method.
+	Method string `json:"method"`
+	// Path is the inbound request path.
+	Path string `json:"path"`
+	// RawQuery is the raw query string from the inbound request.
+	RawQuery string `json:"rawQuery,omitempty"`
+	// RequestHeaders stores the sanitized inbound headers as JSON.
+	RequestHeaders string `json:"requestHeaders"`
+	// RequestBody stores a capped copy of the inbound body.
+	RequestBody string `json:"requestBody,omitempty"`
+	// RequestBodyTruncated reports whether the stored request body preview was shortened.
+	RequestBodyTruncated bool `json:"requestBodyTruncated"`
+	// ResponseStatus is the final status code returned to the caller.
+	ResponseStatus int `json:"responseStatus,omitempty"`
+	// ResponseHeaders stores the final response headers as JSON.
+	ResponseHeaders string `json:"responseHeaders,omitempty"`
+	// ResponseBody stores a capped copy of the final response body.
+	ResponseBody string `json:"responseBody,omitempty"`
+	// ResponseBodyTruncated reports whether the stored response body preview was shortened.
+	ResponseBodyTruncated bool `json:"responseBodyTruncated"`
+	// ErrorText stores the final error message, if the request failed.
+	ErrorText string `json:"error,omitempty"`
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS int64 `json:"durationMs,omitempty"`
+	// RequestedAt records when the request log row was created.
+	RequestedAt string `json:"requestedAt"`
+	// CompletedAt records when the request log row was finalized.
+	CompletedAt string `json:"completedAt,omitempty"`
+}
+
+// proxyRequestLogCreate captures the request-side fields inserted when a log
+// row is first created.
+type proxyRequestLogCreate struct {
+	// Method is the inbound HTTP method.
+	Method string
+	// Path is the inbound request path.
+	Path string
+	// RawQuery is the raw query string from the inbound request.
+	RawQuery string
+	// ModelID is the model identifier that the request is targeting.
+	ModelID string
+	// RequestHeaders stores the sanitized inbound headers as JSON.
+	RequestHeaders string
+	// RequestBody stores a capped copy of the inbound body.
+	RequestBody string
+	// RequestBodyTruncated reports whether the stored request body preview was shortened.
+	RequestBodyTruncated bool
+	// RequestedAt records when the log row was created.
+	RequestedAt time.Time
+}
+
+// proxyRequestLogUpdate captures the response-side fields written when a log row
+// is finalized.
+type proxyRequestLogUpdate struct {
+	// ProviderID is the selected provider, if any.
+	ProviderID *int64
+	// ProviderName is the provider label captured at request time.
+	ProviderName string
+	// ResponseStatus is the final status code returned to the caller.
+	ResponseStatus int
+	// ResponseHeaders stores the final response headers as JSON.
+	ResponseHeaders string
+	// ResponseBody stores a capped copy of the final response body.
+	ResponseBody string
+	// ResponseBodyTruncated reports whether the stored response body preview was shortened.
+	ResponseBodyTruncated bool
+	// ErrorText stores the final error message, if the request failed.
+	ErrorText string
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS int64
+	// CompletedAt records when the request finished.
+	CompletedAt time.Time
+}
+
 // providerMutation captures the normalized fields used when creating or updating a provider.
 type providerMutation struct {
 	// Name is the normalized provider label.
@@ -119,6 +244,29 @@ func (s *store) migrate(ctx context.Context) error {
 			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_provider_models_model_id ON provider_models (model_id);`,
+		`CREATE TABLE IF NOT EXISTS proxy_request_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			provider_id INTEGER,
+			provider_name TEXT,
+			model_id TEXT,
+			method TEXT NOT NULL,
+			path TEXT NOT NULL,
+			raw_query TEXT NOT NULL,
+			request_headers TEXT NOT NULL,
+			request_body TEXT NOT NULL,
+			request_body_truncated INTEGER NOT NULL DEFAULT 0,
+			response_status INTEGER,
+			response_headers TEXT,
+			response_body TEXT,
+			response_body_truncated INTEGER NOT NULL DEFAULT 0,
+			error_text TEXT,
+			duration_ms INTEGER,
+			requested_at TEXT NOT NULL,
+			completed_at TEXT,
+			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_requested_at ON proxy_request_logs (requested_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_provider_id ON proxy_request_logs (provider_id, requested_at DESC, id DESC);`,
 	}
 
 	for _, statement := range statements {
@@ -272,6 +420,128 @@ func (s *store) deleteProvider(ctx context.Context, id int64) error {
 	}
 
 	return nil
+}
+
+// createProxyRequestLog inserts a new request audit record and returns its row ID.
+func (s *store) createProxyRequestLog(ctx context.Context, entry proxyRequestLogCreate) (int64, error) {
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO proxy_request_logs (
+			provider_id, provider_name, model_id, method, path, raw_query,
+			request_headers, request_body, request_body_truncated, requested_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, nil, "", entry.ModelID, entry.Method, entry.Path, entry.RawQuery, entry.RequestHeaders, entry.RequestBody, boolToInt(entry.RequestBodyTruncated), entry.RequestedAt.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("insert proxy request log: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("read proxy request log id: %w", err)
+	}
+
+	return id, nil
+}
+
+// completeProxyRequestLog finalizes a request audit record with the response metadata.
+func (s *store) completeProxyRequestLog(ctx context.Context, id int64, update proxyRequestLogUpdate) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE proxy_request_logs
+		SET provider_id = ?, provider_name = ?, response_status = ?, response_headers = ?, response_body = ?,
+			response_body_truncated = ?, error_text = ?, duration_ms = ?, completed_at = ?
+		WHERE id = ?
+	`, nullableInt64(update.ProviderID), update.ProviderName, update.ResponseStatus, update.ResponseHeaders, update.ResponseBody, boolToInt(update.ResponseBodyTruncated), update.ErrorText, update.DurationMS, update.CompletedAt.UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("update proxy request log: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read proxy request log rows: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("proxy request log %d not found", id)
+	}
+
+	return nil
+}
+
+// deleteProxyRequestLogs removes request audit rows that match the provided filters.
+func (s *store) deleteProxyRequestLogs(ctx context.Context, providerID *int64, from, to *time.Time) (int64, error) {
+	clauses := []string{"1 = 1"}
+	args := make([]any, 0, 3)
+
+	if providerID != nil {
+		clauses = append(clauses, "provider_id = ?")
+		args = append(args, *providerID)
+	}
+	if from != nil {
+		clauses = append(clauses, "requested_at >= ?")
+		args = append(args, from.UTC().Format(time.RFC3339))
+	}
+	if to != nil {
+		clauses = append(clauses, "requested_at <= ?")
+		args = append(args, to.UTC().Format(time.RFC3339))
+	}
+
+	query := fmt.Sprintf("DELETE FROM proxy_request_logs WHERE %s", strings.Join(clauses, " AND "))
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete proxy request logs: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read deleted proxy request log rows: %w", err)
+	}
+
+	return affected, nil
+}
+
+// listProxyRequestLogs returns recent request audit rows ordered from newest to oldest.
+func (s *store) listProxyRequestLogs(ctx context.Context, limit int) ([]proxyRequestLogRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			id, provider_id, provider_name, model_id, method, path, raw_query,
+			request_headers, request_body, request_body_truncated,
+			response_status, response_headers, response_body, response_body_truncated,
+			error_text, duration_ms, requested_at, completed_at
+		FROM proxy_request_logs
+		ORDER BY requested_at DESC, id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query proxy request logs: %w", err)
+	}
+	defer rows.Close()
+
+	logs := make([]proxyRequestLogRecord, 0, limit)
+	for rows.Next() {
+		record, err := scanProxyRequestLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate proxy request logs: %w", err)
+	}
+
+	return logs, nil
+}
+
+// listProxyRequestLogViews returns recent request audit rows in a JSON-friendly shape.
+func (s *store) listProxyRequestLogViews(ctx context.Context, limit int) ([]proxyRequestLogView, error) {
+	logs, err := s.listProxyRequestLogs(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	views := make([]proxyRequestLogView, 0, len(logs))
+	for _, log := range logs {
+		views = append(views, log.toView())
+	}
+
+	return views, nil
 }
 
 // syncProviderModels replaces the provider's model mapping set with the provided IDs.
@@ -459,6 +729,65 @@ func (s *store) listModelsForProvider(ctx context.Context, providerID int64) ([]
 	return models, nil
 }
 
+// scanProxyRequestLog reads a proxy request audit row from either a query row or iterator.
+func scanProxyRequestLog(scanner interface {
+	Scan(dest ...any) error
+}) (proxyRequestLogRecord, error) {
+	var record proxyRequestLogRecord
+	var (
+		requestBodyTruncated  int
+		responseStatus        sql.NullInt64
+		responseBodyTruncated int
+		durationMS            sql.NullInt64
+		requestedAtRaw        string
+		completedAtRaw        sql.NullString
+	)
+
+	if err := scanner.Scan(
+		&record.ID,
+		&record.ProviderID,
+		&record.ProviderName,
+		&record.ModelID,
+		&record.Method,
+		&record.Path,
+		&record.RawQuery,
+		&record.RequestHeaders,
+		&record.RequestBody,
+		&requestBodyTruncated,
+		&responseStatus,
+		&record.ResponseHeaders,
+		&record.ResponseBody,
+		&responseBodyTruncated,
+		&record.ErrorText,
+		&durationMS,
+		&requestedAtRaw,
+		&completedAtRaw,
+	); err != nil {
+		return proxyRequestLogRecord{}, err
+	}
+
+	record.RequestBodyTruncated = requestBodyTruncated == 1
+	record.ResponseStatus = responseStatus
+	record.ResponseBodyTruncated = responseBodyTruncated == 1
+	record.DurationMS = durationMS
+
+	requestedAt, err := time.Parse(time.RFC3339, requestedAtRaw)
+	if err != nil {
+		return proxyRequestLogRecord{}, fmt.Errorf("parse proxy request requested_at: %w", err)
+	}
+	record.RequestedAt = requestedAt
+
+	if completedAtRaw.Valid {
+		parsed, err := time.Parse(time.RFC3339, completedAtRaw.String)
+		if err != nil {
+			return proxyRequestLogRecord{}, fmt.Errorf("parse proxy request completed_at: %w", err)
+		}
+		record.CompletedAt = sql.NullTime{Time: parsed, Valid: true}
+	}
+
+	return record, nil
+}
+
 // scanProvider reads a provider row from either a query row or rows iterator.
 func scanProvider(scanner interface {
 	Scan(dest ...any) error
@@ -529,6 +858,40 @@ func (p providerRecord) toView() providerView {
 	return view
 }
 
+// toView converts the internal audit record into the JSON payload used by the UI.
+func (record proxyRequestLogRecord) toView() proxyRequestLogView {
+	view := proxyRequestLogView{
+		ID:                    record.ID,
+		ProviderName:          record.ProviderName,
+		ModelID:               record.ModelID,
+		Method:                record.Method,
+		Path:                  record.Path,
+		RawQuery:              record.RawQuery,
+		RequestHeaders:        record.RequestHeaders,
+		RequestBody:           record.RequestBody,
+		RequestBodyTruncated:  record.RequestBodyTruncated,
+		ResponseHeaders:       record.ResponseHeaders,
+		ResponseBody:          record.ResponseBody,
+		ResponseBodyTruncated: record.ResponseBodyTruncated,
+		ErrorText:             record.ErrorText,
+		RequestedAt:           record.RequestedAt.UTC().Format(time.RFC3339),
+	}
+	if record.ProviderID.Valid {
+		view.ProviderID = record.ProviderID.Int64
+	}
+	if record.ResponseStatus.Valid {
+		view.ResponseStatus = int(record.ResponseStatus.Int64)
+	}
+	if record.DurationMS.Valid {
+		view.DurationMS = record.DurationMS.Int64
+	}
+	if record.CompletedAt.Valid {
+		view.CompletedAt = record.CompletedAt.Time.UTC().Format(time.RFC3339)
+	}
+
+	return view
+}
+
 // maskAPIKey keeps only a short prefix and suffix so the UI can show a safe preview.
 func maskAPIKey(apiKey string) string {
 	if apiKey == "" {
@@ -546,6 +909,14 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+// nullableInt64 converts an optional provider identifier into a database value.
+func nullableInt64(value *int64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 // nowRFC3339 returns the current UTC timestamp formatted for SQLite storage.

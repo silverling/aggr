@@ -44,6 +44,27 @@ type openAIModelResponse struct {
 	Providers []string `json:"providers,omitempty"`
 }
 
+// flushingWriter wraps a response writer so long-lived streamed responses flush
+// after each copied chunk reaches the caller.
+type flushingWriter struct {
+	// writer receives the proxied bytes.
+	writer io.Writer
+	// flusher exposes the HTTP flush primitive for streamed responses.
+	flusher http.Flusher
+}
+
+// Write forwards the bytes to the client and immediately flushes them so
+// streamed provider responses remain responsive.
+func (writer *flushingWriter) Write(p []byte) (int, error) {
+	written, err := writer.writer.Write(p)
+	if err != nil {
+		return written, err
+	}
+
+	writer.flusher.Flush()
+	return written, nil
+}
+
 // normalizeBaseURL validates and canonicalizes a provider base URL before it is stored.
 func normalizeBaseURL(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
@@ -151,8 +172,9 @@ func buildProviderRequestOptions(headers http.Header, query url.Values) []option
 	return options
 }
 
-// copyUpstreamResponse streams an upstream HTTP response to the caller and preserves headers.
-func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, providerName string, modelID string, logger *slog.Logger) {
+// copyUpstreamResponse streams an upstream HTTP response to the caller while
+// capturing the final headers and a capped body preview for audit logging.
+func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, providerName string, modelID string, logger *slog.Logger) proxyResponseCapture {
 	defer response.Body.Close()
 
 	copyResponseHeaders(w.Header(), response.Header)
@@ -162,12 +184,27 @@ func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, provid
 	}
 	w.WriteHeader(response.StatusCode)
 
+	streamWriter := io.Writer(w)
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
+		streamWriter = &flushingWriter{
+			writer:  w,
+			flusher: flusher,
+		}
 	}
 
-	if _, err := io.Copy(w, response.Body); err != nil {
-		logger.Warn("stream upstream response", "provider", providerName, "model", modelID, "error", err)
+	bodyBuffer := newCappedBuffer(maxAuditBodyBytes)
+	_, streamErr := io.Copy(io.MultiWriter(streamWriter, bodyBuffer), response.Body)
+	if streamErr != nil {
+		logger.Warn("stream upstream response", "provider", providerName, "model", modelID, "error", streamErr)
+	}
+
+	return proxyResponseCapture{
+		StatusCode:    response.StatusCode,
+		HeadersJSON:   headersToAuditJSON(w.Header()),
+		Body:          bodyBuffer.String(),
+		BodyTruncated: bodyBuffer.Truncated(),
+		StreamError:   streamErr,
 	}
 }
 
@@ -316,29 +353,33 @@ func (s *server) syncAllProviders(ctx context.Context) map[int64]string {
 
 // proxyOpenAIRequest forwards OpenAI-compatible traffic to the provider that serves the requested model.
 func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
+	startedAt := time.Now()
+	auditContext := context.WithoutCancel(r.Context())
+
 	modelID, body, err := ExtractModelHint(r)
+	logID := s.createProxyRequestAudit(auditContext, r, modelID, body)
 	if err != nil {
 		if errors.Is(err, errModelHintMissing) {
-			writeError(w, http.StatusBadRequest, "requests under /v1 must include a model field or target /v1/models/{id}")
+			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusBadRequest, "requests under /v1 must include a model field or target /v1/models/{id}")
 			return
 		}
-		writeError(w, http.StatusBadRequest, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	provider, err := s.store.findProviderForModel(r.Context(), modelID)
 	if err != nil {
 		if errors.Is(err, errProviderNotFound) {
-			writeError(w, http.StatusNotFound, fmt.Sprintf("no enabled provider serves model %q", modelID))
+			s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusNotFound, fmt.Sprintf("no enabled provider serves model %q", modelID))
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	path, err := resolveProviderPath(provider.BaseURL, r.URL.Path)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, http.StatusBadGateway, err.Error())
 		return
 	}
 
@@ -353,15 +394,38 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	var response *http.Response
 	err = client.Execute(r.Context(), r.Method, path, requestBody, &response, options...)
 	if err != nil && response == nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("upstream request failed: %v", err))
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, http.StatusBadGateway, fmt.Sprintf("upstream request failed: %v", err))
 		return
 	}
 	if response == nil {
-		writeError(w, http.StatusBadGateway, "upstream request returned no response")
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, &provider, http.StatusBadGateway, "upstream request returned no response")
 		return
 	}
 
-	copyUpstreamResponse(w, response, provider.Name, modelID, s.logger)
+	capture := copyUpstreamResponse(w, response, provider.Name, modelID, s.logger)
+	errorText := ""
+	if err != nil {
+		errorText = err.Error()
+	}
+	if capture.StreamError != nil {
+		if errorText == "" {
+			errorText = capture.StreamError.Error()
+		} else {
+			errorText = fmt.Sprintf("%s; %s", errorText, capture.StreamError.Error())
+		}
+	}
+
+	s.completeProxyRequestAudit(auditContext, logID, proxyRequestLogUpdate{
+		ProviderID:            &provider.ID,
+		ProviderName:          provider.Name,
+		ResponseStatus:        capture.StatusCode,
+		ResponseHeaders:       capture.HeadersJSON,
+		ResponseBody:          capture.Body,
+		ResponseBodyTruncated: capture.BodyTruncated,
+		ErrorText:             errorText,
+		DurationMS:            time.Since(startedAt).Milliseconds(),
+		CompletedAt:           time.Now(),
+	})
 }
 
 // toOpenAIModels converts the aggregated route table into the OpenAI models-list response shape.

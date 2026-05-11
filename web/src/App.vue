@@ -3,17 +3,30 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import ModelCard from './components/ModelCard.vue'
 import NoticeBanner from './components/NoticeBanner.vue'
 import ProviderCard from './components/ProviderCard.vue'
+import RequestLogCard from './components/RequestLogCard.vue'
 import StatCard from './components/StatCard.vue'
-import type { ModelRoute, ModelsPayload, NoticeTone, ProviderView, ProvidersPayload } from './types'
+import type {
+	DeleteProxyRequestsPayload,
+	ModelRoute,
+	ModelsPayload,
+	NoticeTone,
+	ProviderView,
+	ProvidersPayload,
+	ProxyRequestLogView,
+	ProxyRequestsPayload,
+} from './types'
 
 const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
+const requestLogs = ref<ProxyRequestLogView[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const syncingAll = ref(false)
 const syncingProviderId = ref<number | null>(null)
 const editingProviderId = ref<number | null>(null)
+const clearingLogs = ref(false)
 const notice = ref<{ tone: NoticeTone; text: string } | null>(null)
+const requestLogLimit = 40
 
 const form = reactive({
 	name: '',
@@ -22,11 +35,18 @@ const form = reactive({
 	enabled: true,
 })
 
+const clearRequestLogsForm = reactive({
+	providerId: '',
+	from: '',
+	to: '',
+})
+
 const gatewayBase = computed(() => `${window.location.origin}/v1`)
 const providerCount = computed(() => providers.value.length)
 const enabledProviderCount = computed(() => providers.value.filter((provider) => provider.enabled).length)
 const modelCount = computed(() => models.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
+const requestLogCount = computed(() => requestLogs.value.length)
 const isEditing = computed(() => editingProviderId.value !== null)
 const featuredModel = computed(() => models.value[0]?.id ?? 'gpt-4.1')
 const curlExample = computed(() =>
@@ -76,12 +96,14 @@ async function loadDashboard(showNotice = false) {
 	clearNotice()
 
 	try {
-		const [providerPayload, modelPayload] = await Promise.all([
+		const [providerPayload, modelPayload, requestPayload] = await Promise.all([
 			request<ProvidersPayload>('/api/providers'),
 			request<ModelsPayload>('/api/models'),
+			request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`),
 		])
 		providers.value = providerPayload.providers
 		models.value = modelPayload.models
+		requestLogs.value = requestPayload.requests
 
 		if (showNotice) {
 			setNotice('info', 'Dashboard refreshed.')
@@ -191,12 +213,74 @@ async function removeProvider(provider: ProviderView) {
 	}
 }
 
+function resetRequestLogFilters() {
+	clearRequestLogsForm.providerId = ''
+	clearRequestLogsForm.from = ''
+	clearRequestLogsForm.to = ''
+}
+
+function toRFC3339(value: string, label: string) {
+	if (!value) {
+		return ''
+	}
+
+	const parsed = new Date(value)
+	if (Number.isNaN(parsed.valueOf())) {
+		throw new Error(`Invalid ${label}.`)
+	}
+
+	return parsed.toISOString()
+}
+
 async function copyGatewayBase() {
 	try {
 		await navigator.clipboard.writeText(gatewayBase.value)
 		setNotice('success', 'Gateway base copied to the clipboard.')
 	} catch {
 		setNotice('error', 'Clipboard access is unavailable in this browser.')
+	}
+}
+
+async function clearLogs() {
+	const hasFilters = clearRequestLogsForm.providerId !== '' || clearRequestLogsForm.from !== '' || clearRequestLogsForm.to !== ''
+	if (!window.confirm(hasFilters ? 'Clear the request logs that match the selected filters?' : 'Clear every recorded request log?')) {
+		return
+	}
+
+	clearingLogs.value = true
+	clearNotice()
+
+	try {
+		const params = new URLSearchParams()
+		if (clearRequestLogsForm.providerId !== '') {
+			params.set('providerId', clearRequestLogsForm.providerId)
+		}
+
+		const from = toRFC3339(clearRequestLogsForm.from, 'start date')
+		const to = toRFC3339(clearRequestLogsForm.to, 'end date')
+		if (from) {
+			params.set('from', from)
+		}
+		if (to) {
+			params.set('to', to)
+		}
+
+		const suffix = params.toString() === '' ? '' : `?${params.toString()}`
+		const payload = await request<DeleteProxyRequestsPayload>(`/api/requests${suffix}`, {
+			method: 'DELETE',
+		})
+		await loadDashboard()
+
+		if (payload.deleted === 0) {
+			setNotice('info', 'No request logs matched the selected filters.')
+			return
+		}
+
+		setNotice('success', `Deleted ${payload.deleted} request log${payload.deleted === 1 ? '' : 's'}.`)
+	} catch (error) {
+		setNotice('error', error instanceof Error ? error.message : 'Failed to clear request logs.')
+	} finally {
+		clearingLogs.value = false
 	}
 }
 
@@ -399,6 +483,90 @@ onMounted(() => {
 
 			<div v-else class="grid gap-[18px] lg:grid-cols-3">
 				<ModelCard v-for="model in models" :key="model.id" :model="model" />
+			</div>
+		</section>
+
+		<section
+			data-anchor="request-logs"
+			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+		>
+			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+				<div>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Request audit</p>
+					<h2>Recent gateway traffic</h2>
+				</div>
+				<span class="text-ink-soft">{{ requestLogCount }} recent rows</span>
+			</div>
+
+			<div data-anchor="request-log-clear" class="mb-5 grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+				<div>
+					<h3>Clear logs</h3>
+					<p class="mt-1.5 leading-[1.6] text-ink-soft">Delete request history by provider, by requested-at range, or both.</p>
+				</div>
+
+				<div class="grid gap-4 md:grid-cols-3">
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">Provider</span>
+						<select
+							v-model="clearRequestLogsForm.providerId"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+						>
+							<option value="">All providers</option>
+							<option v-for="provider in providers" :key="provider.id" :value="String(provider.id)">
+								{{ provider.name }}
+							</option>
+						</select>
+					</label>
+
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">From</span>
+						<input
+							v-model="clearRequestLogsForm.from"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							type="datetime-local"
+							step="60"
+						/>
+					</label>
+
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">To</span>
+						<input
+							v-model="clearRequestLogsForm.to"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							type="datetime-local"
+							step="60"
+						/>
+					</label>
+				</div>
+
+				<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+					<button
+						class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+						type="button"
+						@click="resetRequestLogFilters"
+					>
+						Reset filters
+					</button>
+					<button
+						class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+						type="button"
+						:disabled="clearingLogs"
+						@click="clearLogs"
+					>
+						{{ clearingLogs ? 'Clearing…' : 'Clear matching logs' }}
+					</button>
+				</div>
+			</div>
+
+			<div
+				v-if="requestLogs.length === 0"
+				class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
+			>
+				No gateway requests have been recorded yet.
+			</div>
+
+			<div v-else class="grid gap-[18px]">
+				<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
 			</div>
 		</section>
 	</div>

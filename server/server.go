@@ -92,6 +92,16 @@ func newServer(cfg Config, db *sql.DB, logger *slog.Logger) (*server, error) {
 	return instance, nil
 }
 
+// NewHandler constructs the HTTP handler tree for the gateway so tests and
+// embedders can exercise the server without calling Run.
+func NewHandler(cfg Config, db *sql.DB, logger *slog.Logger) (http.Handler, error) {
+	instance, err := newServer(cfg, db, logger)
+	if err != nil {
+		return nil, err
+	}
+	return instance.routes(), nil
+}
+
 // routes builds the full HTTP mux for health checks, provider admin APIs,
 // OpenAI-compatible proxy endpoints, and the UI entrypoint.
 func (s *server) routes() http.Handler {
@@ -104,6 +114,8 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/providers/{id}/sync", s.handleSyncProvider)
 	mux.HandleFunc("POST /api/providers/sync", s.handleSyncAllProviders)
 	mux.HandleFunc("GET /api/models", s.handleListModels)
+	mux.HandleFunc("GET /api/requests", s.handleListProxyRequests)
+	mux.HandleFunc("DELETE /api/requests", s.handleDeleteProxyRequests)
 	mux.HandleFunc("GET /v1/models", s.handleListOpenAIModels)
 	mux.HandleFunc("/v1/", s.handleProxyOpenAI)
 	mux.HandleFunc("/", s.handleUI)
@@ -274,15 +286,87 @@ func (s *server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleListOpenAIModels returns the aggregated route table in OpenAI's models-list shape.
-func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) {
-	models, err := s.store.listRouteModels(r.Context())
+// handleListProxyRequests returns the recent OpenAI gateway request audit log.
+func (s *server) handleListProxyRequests(w http.ResponseWriter, r *http.Request) {
+	limit := normalizeProxyRequestLogLimit(r.URL.Query().Get("limit"))
+	requests, err := s.store.listProxyRequestLogViews(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toOpenAIModels(models))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"requests": requests,
+	})
+}
+
+// handleDeleteProxyRequests removes request audit rows that match the provided
+// provider and date-range query filters.
+func (s *server) handleDeleteProxyRequests(w http.ResponseWriter, r *http.Request) {
+	providerID, err := parseOptionalProviderID(r.URL.Query().Get("providerId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	from, err := parseOptionalTimestamp(r.URL.Query().Get("from"), "from")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	to, err := parseOptionalTimestamp(r.URL.Query().Get("to"), "to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if from != nil && to != nil && from.After(*to) {
+		writeError(w, http.StatusBadRequest, "from must be before or equal to to")
+		return
+	}
+
+	deleted, err := s.store.deleteProxyRequestLogs(r.Context(), providerID, from, to)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted": deleted,
+	})
+}
+
+// handleListOpenAIModels returns the aggregated route table in OpenAI's models-list shape.
+func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) {
+	startedAt := time.Now()
+	auditContext := context.WithoutCancel(r.Context())
+	logID := s.createProxyRequestAudit(auditContext, r, "", nil)
+
+	models, err := s.store.listRouteModels(r.Context())
+	if err != nil {
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	body, err := encodeJSONPayload(toOpenAIModels(models))
+	if err != nil {
+		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	responseBody, responseBodyTruncated := truncateAuditBytes(body)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	s.completeProxyRequestAudit(auditContext, logID, proxyRequestLogUpdate{
+		ResponseStatus:        http.StatusOK,
+		ResponseHeaders:       headersToAuditJSON(w.Header()),
+		ResponseBody:          responseBody,
+		ResponseBodyTruncated: responseBodyTruncated,
+		DurationMS:            time.Since(startedAt).Milliseconds(),
+		CompletedAt:           time.Now(),
+	})
+
+	writeJSONBytes(w, http.StatusOK, body)
 }
 
 // handleProxyOpenAI forwards OpenAI-compatible requests to the provider that serves the requested model.
@@ -454,11 +538,54 @@ func parseProviderID(raw string) (int64, error) {
 	return id, nil
 }
 
+// parseOptionalProviderID converts an optional query parameter into a provider
+// identifier while allowing the caller to omit the filter entirely.
+func parseOptionalProviderID(raw string) (*int64, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	id, err := parseProviderID(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	return &id, nil
+}
+
+// parseOptionalTimestamp converts an optional RFC3339 query parameter into a
+// UTC timestamp pointer for request-log filtering.
+func parseOptionalTimestamp(raw string, fieldName string) (*time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339, trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s timestamp %q: must be RFC3339", fieldName, raw)
+	}
+
+	utc := parsed.UTC()
+	return &utc, nil
+}
+
 // writeJSON writes a JSON response with the provided status code.
 func writeJSON(w http.ResponseWriter, status int, payload any) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSONBytes(w, status, body)
+}
+
+// writeJSONBytes writes a JSON response body that has already been encoded.
+func writeJSONBytes(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
+	if _, err := w.Write(body); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
