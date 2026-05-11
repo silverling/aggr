@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import ModelCard from './components/ModelCard.vue'
 import ModelAliasCard from './components/ModelAliasCard.vue'
+import StatsSection from './components/StatsSection.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import RequestLogCard from './components/RequestLogCard.vue'
 import StatCard from './components/StatCard.vue'
@@ -14,10 +15,12 @@ import type {
 	ModelRoute,
 	ModelsPayload,
 	NoticeTone,
+	RequestStatsView,
 	ProviderView,
 	ProvidersPayload,
 	ProxyRequestLogView,
 	ProxyRequestsPayload,
+	StatsRangeOption,
 	SetModelDisableRulePayload,
 } from './types'
 
@@ -25,7 +28,9 @@ const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
 const modelAliases = ref<ModelAliasView[]>([])
 const requestLogs = ref<ProxyRequestLogView[]>([])
+const stats = ref<RequestStatsView | null>(null)
 const loading = ref(false)
+const statsLoading = ref(false)
 const saving = ref(false)
 const aliasSaving = ref(false)
 const syncingAll = ref(false)
@@ -36,6 +41,14 @@ const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
 const selectedModelDisableRule = ref<ModelDisableRuleSelection | null>(null)
 const requestLogLimit = 40
+const statsRange = ref('24h')
+const statsRangeOptions: StatsRangeOption[] = [
+	{ value: '1h', label: 'In an hour' },
+	{ value: '24h', label: 'In 24 hours' },
+	{ value: '7d', label: 'In a week' },
+	{ value: '30d', label: 'In a month' },
+	{ value: 'all', label: 'All' },
+]
 
 const form = reactive({
 	name: '',
@@ -64,6 +77,7 @@ const modelCount = computed(() => models.value.length)
 const modelAliasCount = computed(() => modelAliases.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
+const statsError = ref('')
 const isEditing = computed(() => editingProviderId.value !== null)
 const isEditingModelAlias = computed(() => editingModelAliasId.value !== null)
 const enabledProviderOptions = computed(() => providers.value.filter((provider) => provider.enabled))
@@ -238,6 +252,7 @@ async function loadDashboard(showNotice = false) {
 		requestLogs.value = requestPayload.requests
 		reconcileSelectedModelDisableRule()
 		reconcileEditingModelAlias()
+		await loadStats()
 
 		if (showNotice) {
 			setNotice('info', 'Dashboard refreshed.')
@@ -246,6 +261,31 @@ async function loadDashboard(showNotice = false) {
 		setNotice('error', error instanceof Error ? error.message : 'Failed to load dashboard.')
 	} finally {
 		loading.value = false
+	}
+}
+
+let statsRequestVersion = 0
+
+async function loadStats() {
+	const requestVersion = ++statsRequestVersion
+	statsLoading.value = true
+	statsError.value = ''
+
+	try {
+		const payload = await request<RequestStatsView>(`/api/stats?range=${encodeURIComponent(statsRange.value)}`)
+		if (requestVersion !== statsRequestVersion) {
+			return
+		}
+		stats.value = payload
+	} catch (error) {
+		if (requestVersion !== statsRequestVersion) {
+			return
+		}
+		statsError.value = error instanceof Error ? error.message : 'Failed to load stats.'
+	} finally {
+		if (requestVersion === statsRequestVersion) {
+			statsLoading.value = false
+		}
 	}
 }
 
@@ -424,6 +464,10 @@ function clearSelectedModelDisableRule() {
 	selectedModelDisableRule.value = null
 }
 
+function updateStatsRange(value: string) {
+	statsRange.value = value
+}
+
 function resetRequestLogFilters() {
 	clearRequestLogsForm.providerId = ''
 	clearRequestLogsForm.from = ''
@@ -533,6 +577,10 @@ async function clearLogs() {
 	}
 }
 
+watch(statsRange, () => {
+	void loadStats()
+})
+
 onMounted(() => {
 	loadDashboard()
 })
@@ -580,6 +628,15 @@ onMounted(() => {
 				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
 			</div>
 		</header>
+
+		<StatsSection
+			:stats="stats"
+			:range="statsRange"
+			:range-options="statsRangeOptions"
+			:loading="statsLoading"
+			:error="statsError"
+			@update:range="updateStatsRange"
+		/>
 
 		<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
 			<article

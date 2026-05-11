@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -266,6 +267,111 @@ type proxyRequestLogView struct {
 	CompletedAt string `json:"completedAt,omitempty"`
 }
 
+// requestStatsSummaryView is the aggregated request-and-token summary returned
+// by the stats API for the selected date range.
+type requestStatsSummaryView struct {
+	// Requests is the total number of audited requests in the selected range.
+	Requests int64 `json:"requests"`
+	// Succeeded is the number of completed requests that returned a 2xx status.
+	Succeeded int64 `json:"succeeded"`
+	// Failed is the number of completed requests that returned a non-2xx status.
+	Failed int64 `json:"failed"`
+	// ConsumedTokens is the total of input plus output tokens.
+	ConsumedTokens int64 `json:"consumedTokens"`
+	// CachedInputTokens is the subset of input tokens served from cache.
+	CachedInputTokens int64 `json:"cachedInputTokens"`
+	// NonCachedInputTokens is the subset of input tokens that were not cached.
+	NonCachedInputTokens int64 `json:"nonCachedInputTokens"`
+	// OutputTokens is the number of generated output tokens.
+	OutputTokens int64 `json:"outputTokens"`
+	// OngoingRequests is the number of requests that have not completed yet.
+	OngoingRequests int64 `json:"ongoingRequests"`
+}
+
+// requestStatsBucketView is one bucket in the token-usage charts returned by
+// the stats API.
+type requestStatsBucketView struct {
+	// Start is the UTC bucket start timestamp.
+	Start string `json:"start"`
+	// Label is the human-readable label shown in the chart.
+	Label string `json:"label"`
+	// Requests is the number of requests started within the bucket.
+	Requests int64 `json:"requests"`
+	// Succeeded is the number of completed 2xx requests in the bucket.
+	Succeeded int64 `json:"succeeded"`
+	// Failed is the number of completed non-2xx requests in the bucket.
+	Failed int64 `json:"failed"`
+	// ConsumedTokens is the sum of input and output tokens for the bucket.
+	ConsumedTokens int64 `json:"consumedTokens"`
+	// CachedInputTokens is the number of cached input tokens in the bucket.
+	CachedInputTokens int64 `json:"cachedInputTokens"`
+	// NonCachedInputTokens is the number of non-cached input tokens.
+	NonCachedInputTokens int64 `json:"nonCachedInputTokens"`
+	// OutputTokens is the number of output tokens in the bucket.
+	OutputTokens int64 `json:"outputTokens"`
+}
+
+// requestStatsView is the JSON payload returned by the stats API.
+type requestStatsView struct {
+	// Range is the canonical selector used for the current summary window.
+	Range string `json:"range"`
+	// RangeLabel is the human-readable label for the current summary window.
+	RangeLabel string `json:"rangeLabel"`
+	// Summary contains the top-line counts for the selected range.
+	Summary requestStatsSummaryView `json:"summary"`
+	// Daily contains the recent 7-day token chart.
+	Daily []requestStatsBucketView `json:"daily"`
+	// Hourly contains the recent 12-hour token chart.
+	Hourly []requestStatsBucketView `json:"hourly"`
+}
+
+// requestTokenUsage captures the token counts extracted from a completed
+// OpenAI-style response body.
+type requestTokenUsage struct {
+	// InputTokens is the number of prompt or input tokens reported by the API.
+	InputTokens int64
+	// CachedInputTokens is the portion of input tokens served from cache.
+	CachedInputTokens int64
+	// NonCachedInputTokens is the portion of input tokens not served from cache.
+	NonCachedInputTokens int64
+	// OutputTokens is the number of generated output tokens reported by the API.
+	OutputTokens int64
+}
+
+// requestStatsBucketFrame tracks the time span and running totals for one chart bucket.
+type requestStatsBucketFrame struct {
+	// Start marks the inclusive start of the bucket.
+	Start time.Time
+	// End marks the exclusive end of the bucket.
+	End time.Time
+	// Label is the human-readable label shown in the chart.
+	Label string
+	// Requests counts requests that began in this bucket.
+	Requests int64
+	// Succeeded counts successful requests in this bucket.
+	Succeeded int64
+	// Failed counts failed requests in this bucket.
+	Failed int64
+	// ConsumedTokens is the sum of input and output tokens for the bucket.
+	ConsumedTokens int64
+	// CachedInputTokens counts cached input tokens for the bucket.
+	CachedInputTokens int64
+	// NonCachedInputTokens counts non-cached input tokens for the bucket.
+	NonCachedInputTokens int64
+	// OutputTokens counts output tokens for the bucket.
+	OutputTokens int64
+}
+
+// requestStatsWindow captures the selected summary range for the stats API.
+type requestStatsWindow struct {
+	// Key is the canonical selector used by the UI.
+	Key string
+	// Label is the human-readable label shown in the UI.
+	Label string
+	// From is the optional inclusive lower bound for the selected range.
+	From *time.Time
+}
+
 // proxyRequestLogCreate captures the request-side fields inserted when a log
 // row is first created.
 type proxyRequestLogCreate struct {
@@ -414,6 +520,7 @@ func (s *store) migrate(ctx context.Context) error {
 			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_requested_at ON proxy_request_logs (requested_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_completed_at ON proxy_request_logs (completed_at);`,
 		`CREATE INDEX IF NOT EXISTS idx_proxy_request_logs_provider_id ON proxy_request_logs (provider_id, requested_at DESC, id DESC);`,
 	}
 
@@ -851,6 +958,100 @@ func (s *store) listProxyRequestLogViews(ctx context.Context, limit int) ([]prox
 	}
 
 	return views, nil
+}
+
+// listProxyRequestLogsBetween returns audited request rows whose requested-at
+// timestamp falls within the provided inclusive range.
+func (s *store) listProxyRequestLogsBetween(ctx context.Context, from *time.Time, to time.Time) ([]proxyRequestLogRecord, error) {
+	clauses := []string{"requested_at <= ?"}
+	args := []any{to.UTC().Format(time.RFC3339)}
+	if from != nil {
+		clauses = append(clauses, "requested_at >= ?")
+		args = append(args, from.UTC().Format(time.RFC3339))
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			id, provider_id, provider_name, model_id, method, path, raw_query,
+			request_headers, request_body, request_body_truncated,
+			sent_request_method, sent_request_url, sent_request_headers, sent_request_body, sent_request_body_truncated,
+			response_status, response_headers, response_body, response_body_truncated,
+			error_text, duration_ms, requested_at, completed_at
+		FROM proxy_request_logs
+		WHERE %s
+		ORDER BY requested_at ASC, id ASC
+	`, strings.Join(clauses, " AND "))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query proxy request logs by range: %w", err)
+	}
+	defer rows.Close()
+
+	logs := make([]proxyRequestLogRecord, 0)
+	for rows.Next() {
+		record, err := scanProxyRequestLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate proxy request logs by range: %w", err)
+	}
+
+	return logs, nil
+}
+
+// countOngoingProxyRequestLogs returns the number of audited requests whose
+// response has not finished yet.
+func (s *store) countOngoingProxyRequestLogs(ctx context.Context) (int64, error) {
+	var count int64
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM proxy_request_logs
+		WHERE completed_at IS NULL
+	`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count ongoing proxy request logs: %w", err)
+	}
+
+	return count, nil
+}
+
+// listRequestStats returns the selected summary metrics together with the fixed
+// recent daily and hourly token-usage charts for the dashboard.
+func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow, now time.Time) (requestStatsView, error) {
+	summaryLogs, err := s.listProxyRequestLogsBetween(ctx, window.From, now)
+	if err != nil {
+		return requestStatsView{}, err
+	}
+
+	summary := summarizeRequestLogs(summaryLogs)
+	ongoing, err := s.countOngoingProxyRequestLogs(ctx)
+	if err != nil {
+		return requestStatsView{}, err
+	}
+	summary.OngoingRequests = ongoing
+
+	dailyStart := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -6)
+	dailyLogs, err := s.listProxyRequestLogsBetween(ctx, &dailyStart, now)
+	if err != nil {
+		return requestStatsView{}, err
+	}
+
+	hourlyStart := now.UTC().Truncate(time.Hour).Add(-11 * time.Hour)
+	hourlyLogs, err := s.listProxyRequestLogsBetween(ctx, &hourlyStart, now)
+	if err != nil {
+		return requestStatsView{}, err
+	}
+
+	return requestStatsView{
+		Range:      window.Key,
+		RangeLabel: window.Label,
+		Summary:    summary,
+		Daily:      buildDailyRequestStatsBuckets(dailyLogs, dailyStart),
+		Hourly:     buildHourlyRequestStatsBuckets(hourlyLogs, hourlyStart),
+	}, nil
 }
 
 // syncProviderModels replaces the provider's model mapping set with the provided IDs.
@@ -1695,6 +1896,232 @@ func (record proxyRequestLogRecord) toView() proxyRequestLogView {
 	}
 
 	return view
+}
+
+// summarizeRequestLogs reduces a slice of audited request records into the
+// top-line counts shown in the stats dashboard.
+func summarizeRequestLogs(logs []proxyRequestLogRecord) requestStatsSummaryView {
+	summary := requestStatsSummaryView{}
+	for _, log := range logs {
+		summary.Requests++
+		applyRequestLogOutcome(&summary.Succeeded, &summary.Failed, log)
+		applyRequestLogUsage(
+			&summary.ConsumedTokens,
+			&summary.CachedInputTokens,
+			&summary.NonCachedInputTokens,
+			&summary.OutputTokens,
+			log,
+		)
+	}
+
+	return summary
+}
+
+// buildDailyRequestStatsBuckets aggregates logs into 7 calendar-day buckets
+// starting at the provided UTC midnight.
+func buildDailyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time) []requestStatsBucketView {
+	frames := make([]requestStatsBucketFrame, 0, 7)
+	for index := 0; index < 7; index++ {
+		bucketStart := start.AddDate(0, 0, index)
+		frames = append(frames, requestStatsBucketFrame{
+			Start: bucketStart,
+			End:   bucketStart.Add(24 * time.Hour),
+			Label: bucketStart.Format("Jan 2"),
+		})
+	}
+
+	applyRequestLogsToBuckets(frames, logs)
+	return requestStatsBucketFramesToViews(frames)
+}
+
+// buildHourlyRequestStatsBuckets aggregates logs into 12 hourly buckets
+// starting at the provided UTC hour boundary.
+func buildHourlyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time) []requestStatsBucketView {
+	frames := make([]requestStatsBucketFrame, 0, 12)
+	for index := 0; index < 12; index++ {
+		bucketStart := start.Add(time.Duration(index) * time.Hour)
+		frames = append(frames, requestStatsBucketFrame{
+			Start: bucketStart,
+			End:   bucketStart.Add(time.Hour),
+			Label: bucketStart.Format("15:00"),
+		})
+	}
+
+	applyRequestLogsToBuckets(frames, logs)
+	return requestStatsBucketFramesToViews(frames)
+}
+
+// applyRequestLogsToBuckets updates the matching bucket for each audited request.
+func applyRequestLogsToBuckets(frames []requestStatsBucketFrame, logs []proxyRequestLogRecord) {
+	if len(frames) == 0 {
+		return
+	}
+
+	for _, log := range logs {
+		for index := range frames {
+			if log.RequestedAt.Before(frames[index].Start) || !log.RequestedAt.Before(frames[index].End) {
+				continue
+			}
+
+			frames[index].Requests++
+			applyRequestLogOutcome(&frames[index].Succeeded, &frames[index].Failed, log)
+			applyRequestLogUsage(
+				&frames[index].ConsumedTokens,
+				&frames[index].CachedInputTokens,
+				&frames[index].NonCachedInputTokens,
+				&frames[index].OutputTokens,
+				log,
+			)
+			break
+		}
+	}
+}
+
+// requestStatsBucketFramesToViews converts bucket frames into the JSON payload
+// returned by the stats API.
+func requestStatsBucketFramesToViews(frames []requestStatsBucketFrame) []requestStatsBucketView {
+	views := make([]requestStatsBucketView, 0, len(frames))
+	for _, frame := range frames {
+		views = append(views, requestStatsBucketView{
+			Start:                frame.Start.UTC().Format(time.RFC3339),
+			Label:                frame.Label,
+			Requests:             frame.Requests,
+			Succeeded:            frame.Succeeded,
+			Failed:               frame.Failed,
+			ConsumedTokens:       frame.ConsumedTokens,
+			CachedInputTokens:    frame.CachedInputTokens,
+			NonCachedInputTokens: frame.NonCachedInputTokens,
+			OutputTokens:         frame.OutputTokens,
+		})
+	}
+
+	return views
+}
+
+// applyRequestLogOutcome updates success and failure counters for one audited request.
+func applyRequestLogOutcome(succeeded *int64, failed *int64, log proxyRequestLogRecord) {
+	if !log.CompletedAt.Valid {
+		return
+	}
+
+	if log.ResponseStatus.Valid && log.ResponseStatus.Int64 >= 200 && log.ResponseStatus.Int64 < 300 {
+		*succeeded = *succeeded + 1
+		return
+	}
+
+	*failed = *failed + 1
+}
+
+// applyRequestLogUsage adds the parsed token usage from one audited response to
+// the provided running totals.
+func applyRequestLogUsage(consumedTokens *int64, cachedInputTokens *int64, nonCachedInputTokens *int64, outputTokens *int64, log proxyRequestLogRecord) {
+	usage, ok := extractRequestTokenUsage(log.ResponseBody)
+	if !ok {
+		return
+	}
+
+	*consumedTokens += usage.InputTokens + usage.OutputTokens
+	*cachedInputTokens += usage.CachedInputTokens
+	*nonCachedInputTokens += usage.NonCachedInputTokens
+	*outputTokens += usage.OutputTokens
+}
+
+// extractRequestTokenUsage parses an OpenAI-style response body and returns the
+// token counts needed by the stats dashboard.
+func extractRequestTokenUsage(body string) (requestTokenUsage, bool) {
+	if strings.TrimSpace(body) == "" || !json.Valid([]byte(body)) {
+		return requestTokenUsage{}, false
+	}
+
+	var payload struct {
+		Usage map[string]any `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return requestTokenUsage{}, false
+	}
+	if len(payload.Usage) == 0 {
+		return requestTokenUsage{}, false
+	}
+
+	inputTokens := usageMapInt64(payload.Usage, "prompt_tokens")
+	if inputTokens == 0 {
+		inputTokens = usageMapInt64(payload.Usage, "input_tokens")
+	}
+
+	outputTokens := usageMapInt64(payload.Usage, "completion_tokens")
+	if outputTokens == 0 {
+		outputTokens = usageMapInt64(payload.Usage, "output_tokens")
+	}
+
+	cachedInputTokens := usageDetailsInt64(payload.Usage, "prompt_tokens_details", "cached_tokens")
+	if cachedInputTokens == 0 {
+		cachedInputTokens = usageDetailsInt64(payload.Usage, "input_tokens_details", "cached_tokens")
+	}
+	if cachedInputTokens > inputTokens {
+		cachedInputTokens = inputTokens
+	}
+
+	if inputTokens == 0 && outputTokens == 0 {
+		return requestTokenUsage{}, false
+	}
+
+	return requestTokenUsage{
+		InputTokens:          inputTokens,
+		CachedInputTokens:    cachedInputTokens,
+		NonCachedInputTokens: inputTokens - cachedInputTokens,
+		OutputTokens:         outputTokens,
+	}, true
+}
+
+// usageMapInt64 reads an integer field from a generic usage map.
+func usageMapInt64(values map[string]any, key string) int64 {
+	value, found := values[key]
+	if !found {
+		return 0
+	}
+
+	return anyToInt64(value)
+}
+
+// usageDetailsInt64 reads an integer field from a nested usage-details map.
+func usageDetailsInt64(values map[string]any, parentKey string, childKey string) int64 {
+	parent, found := values[parentKey]
+	if !found {
+		return 0
+	}
+
+	nested, ok := parent.(map[string]any)
+	if !ok {
+		return 0
+	}
+
+	return anyToInt64(nested[childKey])
+}
+
+// anyToInt64 converts a generic decoded JSON value into an int64 when possible.
+func anyToInt64(value any) int64 {
+	switch typed := value.(type) {
+	case nil:
+		return 0
+	case int:
+		return int64(typed)
+	case int32:
+		return int64(typed)
+	case int64:
+		return typed
+	case float32:
+		return int64(typed)
+	case float64:
+		return int64(typed)
+	case json.Number:
+		number, err := typed.Int64()
+		if err != nil {
+			return 0
+		}
+		return number
+	default:
+		return 0
+	}
 }
 
 // maskAPIKey keeps only a short prefix and suffix so the UI can show a safe preview.

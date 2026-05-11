@@ -96,6 +96,42 @@ export interface ProxyRequestsPayload {
 	requests: ProxyRequestLogView[]
 }
 
+export interface RequestStatsSummary {
+	requests: number
+	succeeded: number
+	failed: number
+	consumedTokens: number
+	cachedInputTokens: number
+	nonCachedInputTokens: number
+	outputTokens: number
+	ongoingRequests: number
+}
+
+export interface RequestStatsBucket {
+	start: string
+	label: string
+	requests: number
+	succeeded: number
+	failed: number
+	consumedTokens: number
+	cachedInputTokens: number
+	nonCachedInputTokens: number
+	outputTokens: number
+}
+
+export interface RequestStatsView {
+	range: string
+	rangeLabel: string
+	summary: RequestStatsSummary
+	daily: RequestStatsBucket[]
+	hourly: RequestStatsBucket[]
+}
+
+export interface StatsRangeOption {
+	value: string
+	label: string
+}
+
 export interface DeleteProxyRequestsPayload {
 	deleted: number
 }

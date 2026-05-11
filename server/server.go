@@ -143,6 +143,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/model-aliases/{id}", s.handleUpdateModelAlias)
 	mux.HandleFunc("DELETE /api/model-aliases/{id}", s.handleDeleteModelAlias)
 	mux.HandleFunc("PUT /api/model-disable-rules", s.handleSetModelDisableRule)
+	mux.HandleFunc("GET /api/stats", s.handleGetRequestStats)
 	mux.HandleFunc("GET /api/requests", s.handleListProxyRequests)
 	mux.HandleFunc("DELETE /api/requests", s.handleDeleteProxyRequests)
 	mux.HandleFunc("GET /v1/models", s.handleListOpenAIModels)
@@ -428,6 +429,25 @@ func (s *server) handleSetModelDisableRule(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// handleGetRequestStats returns the selected summary metrics together with the
+// fixed recent token-usage charts for the dashboard.
+func (s *server) handleGetRequestStats(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	window, err := parseRequestStatsWindow(r.URL.Query().Get("range"), now)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	stats, err := s.store.listRequestStats(r.Context(), window, now)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, stats)
 }
 
 // handleListProxyRequests returns the recent OpenAI gateway request audit log.
@@ -768,6 +788,29 @@ func parseOptionalTimestamp(raw string, fieldName string) (*time.Time, error) {
 
 	utc := parsed.UTC()
 	return &utc, nil
+}
+
+// parseRequestStatsWindow converts the dashboard range selector into the
+// selected lower-bound timestamp used by the stats API.
+func parseRequestStatsWindow(raw string, now time.Time) (requestStatsWindow, error) {
+	switch strings.TrimSpace(raw) {
+	case "", "24h":
+		from := now.Add(-24 * time.Hour)
+		return requestStatsWindow{Key: "24h", Label: "In 24 hours", From: &from}, nil
+	case "1h":
+		from := now.Add(-1 * time.Hour)
+		return requestStatsWindow{Key: "1h", Label: "In an hour", From: &from}, nil
+	case "7d":
+		from := now.AddDate(0, 0, -7)
+		return requestStatsWindow{Key: "7d", Label: "In a week", From: &from}, nil
+	case "30d":
+		from := now.AddDate(0, -1, 0)
+		return requestStatsWindow{Key: "30d", Label: "In a month", From: &from}, nil
+	case "all":
+		return requestStatsWindow{Key: "all", Label: "All"}, nil
+	default:
+		return requestStatsWindow{}, fmt.Errorf("invalid stats range %q", raw)
+	}
 }
 
 // writeJSON writes a JSON response with the provided status code.

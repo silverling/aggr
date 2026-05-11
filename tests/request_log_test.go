@@ -300,6 +300,16 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 func newTestGatewayServer(t *testing.T) string {
 	t.Helper()
 
+	gatewayURL, _ := newTestGatewayServerWithDatabase(t)
+	return gatewayURL
+}
+
+// newTestGatewayServerWithDatabase starts the aggr HTTP handler against a
+// temporary SQLite database and returns both the base URL and database handle
+// so tests can seed additional rows directly when needed.
+func newTestGatewayServerWithDatabase(t *testing.T) (string, *sql.DB) {
+	t.Helper()
+
 	dbPath := filepath.Join(t.TempDir(), "aggr-test.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -318,7 +328,7 @@ func newTestGatewayServer(t *testing.T) string {
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
-	return httpServer.URL
+	return httpServer.URL, db
 }
 
 // createTestProvider inserts a provider through the public admin API so the
