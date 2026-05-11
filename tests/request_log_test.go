@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/silverling/aggr/server"
@@ -27,6 +28,8 @@ type testProviderCreateResponse struct {
 type testProviderView struct {
 	// ID is the database identifier assigned by the server.
 	ID int64 `json:"id"`
+	// UserAgent is the optional upstream user-agent string stored for the provider.
+	UserAgent string `json:"userAgent,omitempty"`
 }
 
 // testProxyRequestsResponse mirrors the recent request-log list payload.
@@ -73,11 +76,51 @@ type testDeleteProxyRequestsResponse struct {
 func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	t.Parallel()
 
-	upstream := newTestUpstreamServer(t)
+	var upstreamMu sync.Mutex
+	upstreamUserAgents := make(map[string]string)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamMu.Lock()
+		upstreamUserAgents[r.URL.Path] = r.Header.Get("User-Agent")
+		upstreamMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
+		case "/v1/chat/completions":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read upstream request body: %v", err)
+				http.Error(w, "upstream body read failed", http.StatusInternalServerError)
+				return
+			}
+			if !strings.Contains(string(body), `"model":"gpt-4.1"`) {
+				t.Errorf("upstream request body = %q, expected model hint", string(body))
+				http.Error(w, "missing model hint", http.StatusBadRequest)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_test","object":"chat.completion","model":"gpt-4.1"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
 	defer upstream.Close()
 
 	gatewayURL := newTestGatewayServer(t)
-	provider := createTestProvider(t, gatewayURL, upstream.URL+"/v1")
+	const userAgent = "AggrTest/1.0"
+	provider := createTestProvider(t, gatewayURL, upstream.URL+"/v1", userAgent)
+
+	if provider.UserAgent != userAgent {
+		t.Fatalf("provider user agent = %q, want %q", provider.UserAgent, userAgent)
+	}
+
+	upstreamMu.Lock()
+	modelSyncUserAgent := upstreamUserAgents["/v1/models"]
+	upstreamMu.Unlock()
+	if modelSyncUserAgent != userAgent {
+		t.Fatalf("model sync user agent = %q, want %q", modelSyncUserAgent, userAgent)
+	}
 
 	var modelsPayload map[string]any
 	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
@@ -92,6 +135,13 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 		http.StatusOK,
 		&completionPayload,
 	)
+
+	upstreamMu.Lock()
+	completionUserAgent := upstreamUserAgents["/v1/chat/completions"]
+	upstreamMu.Unlock()
+	if completionUserAgent != userAgent {
+		t.Fatalf("completion user agent = %q, want %q", completionUserAgent, userAgent)
+	}
 
 	var logsPayload testProxyRequestsResponse
 	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
@@ -180,36 +230,6 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 }
 
-// newTestUpstreamServer creates a fake OpenAI-compatible provider used by the
-// gateway integration test.
-func newTestUpstreamServer(t *testing.T) *httptest.Server {
-	t.Helper()
-
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
-		case "/v1/chat/completions":
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Errorf("read upstream request body: %v", err)
-				http.Error(w, "upstream body read failed", http.StatusInternalServerError)
-				return
-			}
-			if !strings.Contains(string(body), `"model":"gpt-4.1"`) {
-				t.Errorf("upstream request body = %q, expected model hint", string(body))
-				http.Error(w, "missing model hint", http.StatusBadRequest)
-				return
-			}
-			_, _ = io.WriteString(w, `{"id":"chatcmpl_test","object":"chat.completion","model":"gpt-4.1"}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-}
-
 // newTestGatewayServer starts the aggr HTTP handler against a temporary SQLite
 // database and returns the base URL that tests can call.
 func newTestGatewayServer(t *testing.T) string {
@@ -238,7 +258,7 @@ func newTestGatewayServer(t *testing.T) string {
 
 // createTestProvider inserts a provider through the public admin API so the
 // request-log integration test exercises the same flow as the Web UI.
-func createTestProvider(t *testing.T, gatewayURL string, baseURL string) testProviderView {
+func createTestProvider(t *testing.T, gatewayURL string, baseURL string, userAgent string) testProviderView {
 	t.Helper()
 
 	var payload testProviderCreateResponse
@@ -247,13 +267,16 @@ func createTestProvider(t *testing.T, gatewayURL string, baseURL string) testPro
 		http.DefaultClient,
 		http.MethodPost,
 		gatewayURL+"/api/providers",
-		`{"name":"Primary","baseUrl":"`+baseURL+`","apiKey":"test-key","enabled":true}`,
+		`{"name":"Primary","baseUrl":"`+baseURL+`","apiKey":"test-key","userAgent":"`+userAgent+`","enabled":true}`,
 		http.StatusCreated,
 		&payload,
 	)
 
 	if payload.Provider.ID <= 0 {
 		t.Fatalf("provider id = %d, want positive value", payload.Provider.ID)
+	}
+	if payload.Provider.UserAgent != userAgent {
+		t.Fatalf("provider user agent = %q, want %q", payload.Provider.UserAgent, userAgent)
 	}
 
 	return payload.Provider

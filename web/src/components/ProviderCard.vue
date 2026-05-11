@@ -52,6 +52,7 @@ function formatTimestamp(value?: string) {
 
 		<div class="flex flex-wrap items-center justify-between gap-3 text-sm text-ink-soft max-lg:items-start">
 			<span>{{ props.provider.apiKeyConfigured ? props.provider.apiKeyPreview : 'No API key' }}</span>
+			<span class="wrap-break-word">User agent: {{ props.provider.userAgent ?? 'Default user agent' }}</span>
 			<span>{{ formatTimestamp(props.provider.lastSyncedAt) }}</span>
 		</div>
 

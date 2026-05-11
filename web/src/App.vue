@@ -32,6 +32,7 @@ const form = reactive({
 	name: '',
 	baseUrl: 'https://api.openai.com/v1',
 	apiKey: '',
+	userAgent: '',
 	enabled: true,
 })
 
@@ -75,6 +76,7 @@ function resetForm() {
 	form.name = ''
 	form.baseUrl = 'https://api.openai.com/v1'
 	form.apiKey = ''
+	form.userAgent = ''
 	form.enabled = true
 }
 
@@ -120,6 +122,7 @@ function beginEdit(provider: ProviderView) {
 	form.name = provider.name
 	form.baseUrl = provider.baseUrl
 	form.apiKey = ''
+	form.userAgent = provider.userAgent ?? ''
 	form.enabled = provider.enabled
 	clearNotice()
 	window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -142,6 +145,7 @@ async function submitProvider() {
 				name: form.name,
 				baseUrl: form.baseUrl,
 				apiKey: form.apiKey,
+				userAgent: form.userAgent,
 				enabled: form.enabled,
 			}),
 		})
@@ -382,6 +386,18 @@ onMounted(() => {
 							:placeholder="isEditing ? 'Leave blank to keep the current key' : 'sk-...'"
 							:required="!isEditing"
 						/>
+					</label>
+
+					<label class="grid gap-2">
+						<span class="text-[0.92rem] font-bold text-ink-strong">User agent</span>
+						<input
+							v-model.trim="form.userAgent"
+							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							type="text"
+							autocomplete="off"
+							placeholder="Aggr/1.0"
+						/>
+						<small class="text-ink-soft">Leave blank to use the SDK default upstream user agent.</small>
 					</label>
 
 					<label class="flex items-center justify-start gap-3 rounded-[var(--radius-field)] border border-line bg-surface-muted px-4 py-[14px]">

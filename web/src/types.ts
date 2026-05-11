@@ -4,6 +4,7 @@ export interface ProviderView {
 	id: number
 	name: string
 	baseUrl: string
+	userAgent?: string
 	enabled: boolean
 	models: string[]
 	lastError?: string

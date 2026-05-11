@@ -50,6 +50,8 @@ type providerPayload struct {
 	BaseURL string `json:"baseUrl"`
 	// APIKey is the bearer token used when calling the upstream provider.
 	APIKey string `json:"apiKey"`
+	// UserAgent is the optional upstream user-agent string used for provider requests.
+	UserAgent string `json:"userAgent"`
 	// Enabled toggles whether the provider can be selected for routing.
 	Enabled *bool `json:"enabled"`
 }
@@ -522,10 +524,11 @@ func (payload providerPayload) validate(allowEmptyAPIKey bool) (providerMutation
 	}
 
 	return providerMutation{
-		Name:    name,
-		BaseURL: baseURL,
-		APIKey:  apiKey,
-		Enabled: enabled,
+		Name:      name,
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		UserAgent: strings.TrimSpace(payload.UserAgent),
+		Enabled:   enabled,
 	}, nil
 }
 

@@ -22,6 +22,8 @@ type providerRecord struct {
 	BaseURL string
 	// APIKey is the bearer token stored for the provider.
 	APIKey string
+	// UserAgent is the optional upstream user-agent string configured for the provider.
+	UserAgent string
 	// Enabled controls whether the provider may be selected for routing.
 	Enabled bool
 	// Models contains the synced model IDs currently associated with the provider.
@@ -44,6 +46,8 @@ type providerView struct {
 	Name string `json:"name"`
 	// BaseURL is the upstream endpoint configured for the provider.
 	BaseURL string `json:"baseUrl"`
+	// UserAgent is the upstream user-agent string configured for the provider.
+	UserAgent string `json:"userAgent,omitempty"`
 	// Enabled reports whether the provider can participate in routing.
 	Enabled bool `json:"enabled"`
 	// Models lists the provider's synced model IDs.
@@ -207,6 +211,8 @@ type providerMutation struct {
 	BaseURL string
 	// APIKey is the trimmed upstream API key.
 	APIKey string
+	// UserAgent is the trimmed upstream user-agent string.
+	UserAgent string
 	// Enabled indicates whether the provider should be routable.
 	Enabled bool
 }
@@ -230,6 +236,7 @@ func (s *store) migrate(ctx context.Context) error {
 			name TEXT NOT NULL,
 			base_url TEXT NOT NULL,
 			api_key TEXT NOT NULL,
+			user_agent TEXT NOT NULL DEFAULT '',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			last_error TEXT,
 			last_synced_at TEXT,
@@ -275,13 +282,53 @@ func (s *store) migrate(ctx context.Context) error {
 		}
 	}
 
+	if err := s.ensureProviderUserAgentColumn(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ensureProviderUserAgentColumn adds the legacy provider user-agent column when
+// migrating a database created before the field existed.
+func (s *store) ensureProviderUserAgentColumn(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(providers)`)
+	if err != nil {
+		return fmt.Errorf("inspect provider schema: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return fmt.Errorf("scan provider schema: %w", err)
+		}
+		if name == "user_agent" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate provider schema: %w", err)
+	}
+
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE providers ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add provider user_agent column: %w", err)
+	}
+
 	return nil
 }
 
 // listProviders returns all providers ordered by enabled status and name.
 func (s *store) listProviders(ctx context.Context) ([]providerRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, base_url, api_key, enabled, last_error, last_synced_at, created_at, updated_at
+		SELECT id, name, base_url, api_key, user_agent, enabled, last_error, last_synced_at, created_at, updated_at
 		FROM providers
 		ORDER BY enabled DESC, name ASC, id ASC
 	`)
@@ -332,7 +379,7 @@ func (s *store) getProvider(ctx context.Context, id int64) (providerRecord, erro
 // getProviderWithModels loads one provider and its model list from the database.
 func (s *store) getProviderWithModels(ctx context.Context, id int64) (providerRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, base_url, api_key, enabled, last_error, last_synced_at, created_at, updated_at
+		SELECT id, name, base_url, api_key, user_agent, enabled, last_error, last_synced_at, created_at, updated_at
 		FROM providers
 		WHERE id = ?
 	`, id)
@@ -357,9 +404,9 @@ func (s *store) getProviderWithModels(ctx context.Context, id int64) (providerRe
 func (s *store) createProvider(ctx context.Context, mutation providerMutation) (providerRecord, error) {
 	now := nowRFC3339()
 	result, err := s.db.ExecContext(ctx, `
-		INSERT INTO providers (name, base_url, api_key, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, mutation.Name, mutation.BaseURL, mutation.APIKey, boolToInt(mutation.Enabled), now, now)
+		INSERT INTO providers (name, base_url, api_key, user_agent, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, mutation.Name, mutation.BaseURL, mutation.APIKey, mutation.UserAgent, boolToInt(mutation.Enabled), now, now)
 	if err != nil {
 		return providerRecord{}, fmt.Errorf("insert provider: %w", err)
 	}
@@ -386,9 +433,9 @@ func (s *store) updateProvider(ctx context.Context, id int64, mutation providerM
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE providers
-		SET name = ?, base_url = ?, api_key = ?, enabled = ?, updated_at = ?
+		SET name = ?, base_url = ?, api_key = ?, user_agent = ?, enabled = ?, updated_at = ?
 		WHERE id = ?
-	`, mutation.Name, mutation.BaseURL, apiKey, boolToInt(mutation.Enabled), nowRFC3339(), id)
+	`, mutation.Name, mutation.BaseURL, apiKey, mutation.UserAgent, boolToInt(mutation.Enabled), nowRFC3339(), id)
 	if err != nil {
 		return providerRecord{}, fmt.Errorf("update provider: %w", err)
 	}
@@ -658,7 +705,7 @@ func (s *store) listRouteModels(ctx context.Context) ([]routeModelView, error) {
 // findProviderForModel returns the most recent enabled provider that serves a model.
 func (s *store) findProviderForModel(ctx context.Context, modelID string) (providerRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT p.id, p.name, p.base_url, p.api_key, p.enabled, p.last_error, p.last_synced_at, p.created_at, p.updated_at
+		SELECT p.id, p.name, p.base_url, p.api_key, p.user_agent, p.enabled, p.last_error, p.last_synced_at, p.created_at, p.updated_at
 		FROM providers p
 		INNER JOIN provider_models pm ON pm.provider_id = p.id
 		WHERE p.enabled = 1 AND pm.model_id = ?
@@ -806,6 +853,7 @@ func scanProvider(scanner interface {
 		&record.Name,
 		&record.BaseURL,
 		&record.APIKey,
+		&record.UserAgent,
 		&enabled,
 		&lastError,
 		&lastSyncedAt,
@@ -846,6 +894,7 @@ func (p providerRecord) toView() providerView {
 		ID:               p.ID,
 		Name:             p.Name,
 		BaseURL:          p.BaseURL,
+		UserAgent:        p.UserAgent,
 		Enabled:          p.Enabled,
 		Models:           append([]string(nil), p.Models...),
 		LastError:        p.LastError,

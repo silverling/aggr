@@ -138,13 +138,18 @@ func ResolveProviderURL(baseURL, requestPath string, rawQuery string) (string, e
 
 // newProviderClient creates an OpenAI SDK client configured for one provider and a specific HTTP transport.
 func (s *server) newProviderClient(provider providerRecord, httpClient *http.Client) openai.Client {
+	options := []option.RequestOption{
+		option.WithBaseURL(provider.BaseURL),
+		option.WithAPIKey(provider.APIKey),
+		option.WithHTTPClient(httpClient),
+		option.WithMaxRetries(0),
+	}
+	if provider.UserAgent != "" {
+		options = append(options, option.WithHeader("User-Agent", provider.UserAgent))
+	}
+
 	return openai.Client{
-		Options: []option.RequestOption{
-			option.WithBaseURL(provider.BaseURL),
-			option.WithAPIKey(provider.APIKey),
-			option.WithHTTPClient(httpClient),
-			option.WithMaxRetries(0),
-		},
+		Options: options,
 	}
 }
 
@@ -153,7 +158,7 @@ func buildProviderRequestOptions(headers http.Header, query url.Values) []option
 	options := make([]option.RequestOption, 0, len(headers)+len(query))
 
 	for key, values := range headers {
-		if isHopByHopHeader(key) || strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "Host") || strings.EqualFold(key, "Content-Length") {
+		if isHopByHopHeader(key) || strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "Host") || strings.EqualFold(key, "Content-Length") || strings.EqualFold(key, "User-Agent") {
 			continue
 		}
 
