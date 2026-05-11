@@ -1,0 +1,4 @@
+aggr
+*.db
+*.db-shm
+*.db-wal
