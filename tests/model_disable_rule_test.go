@@ -51,13 +51,15 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 	secondaryUpstream := newModelDisableRuleUpstreamServer(t, "Secondary")
 	defer secondaryUpstream.Close()
 
-	gatewayURL := newTestGatewayServer(t)
-	primaryProvider := createNamedTestProvider(t, gatewayURL, "Primary", primaryUpstream.URL+"/v1", "PrimaryAgent/1.0")
-	secondaryProvider := createNamedTestProvider(t, gatewayURL, "Secondary", secondaryUpstream.URL+"/v1", "SecondaryAgent/1.0")
+	gatewayURL, client := newTestGatewayServer(t)
+	primaryProvider := createNamedTestProvider(t, client, gatewayURL, "Primary", primaryUpstream.URL+"/v1", "PrimaryAgent/1.0")
+	secondaryProvider := createNamedTestProvider(t, client, gatewayURL, "Secondary", secondaryUpstream.URL+"/v1", "SecondaryAgent/1.0")
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Disable rule test key")
+	v1Client := newAuthenticatedAPIClient(client, apiKey)
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-disable-rules",
 		`{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}`,
@@ -66,7 +68,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 	)
 
 	var providersPayload testProvidersResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/providers", "", http.StatusOK, &providersPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/providers", "", http.StatusOK, &providersPayload)
 	if len(providersPayload.Providers) != 2 {
 		t.Fatalf("provider count = %d, want 2", len(providersPayload.Providers))
 	}
@@ -84,7 +86,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 	}
 
 	var modelsPayload testModelsResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/models", "", http.StatusOK, &modelsPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/models", "", http.StatusOK, &modelsPayload)
 	if len(modelsPayload.Models) != 1 {
 		t.Fatalf("model count = %d, want 1", len(modelsPayload.Models))
 	}
@@ -95,7 +97,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 	var routedPayload map[string]any
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,
@@ -108,7 +110,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-disable-rules",
 		`{"providerId":`+formatInt64(secondaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}`,
@@ -119,7 +121,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 	var errorPayload map[string]any
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,
@@ -132,7 +134,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-disable-rules",
 		`{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":false}`,
@@ -140,7 +142,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 		nil,
 	)
 
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/providers", "", http.StatusOK, &providersPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/providers", "", http.StatusOK, &providersPayload)
 	providerIndex = make(map[string]testProviderView, len(providersPayload.Providers))
 	for _, provider := range providersPayload.Providers {
 		providerIndex[provider.Name] = provider
@@ -155,7 +157,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,

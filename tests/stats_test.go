@@ -104,12 +104,14 @@ func TestRequestStatsSummariesAndCharts(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	gatewayURL, db := newTestGatewayServerWithDatabase(t)
-	createTestProvider(t, gatewayURL, upstream.URL+"/v1", "StatsAgent/1.0")
+	gatewayURL, client, db := newTestGatewayServerWithDatabase(t)
+	createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", "StatsAgent/1.0")
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Stats test key")
+	v1Client := newAuthenticatedAPIClient(client, apiKey)
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,
@@ -118,7 +120,7 @@ func TestRequestStatsSummariesAndCharts(t *testing.T) {
 	)
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"missing-model","messages":[{"role":"user","content":"hello"}]}`,
@@ -158,7 +160,7 @@ func TestRequestStatsSummariesAndCharts(t *testing.T) {
 	})
 
 	var allStats testRequestStatsResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/stats?range=all", "", http.StatusOK, &allStats)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/stats?range=all", "", http.StatusOK, &allStats)
 
 	if allStats.Range != "all" {
 		t.Fatalf("all stats range = %q, want %q", allStats.Range, "all")
@@ -254,7 +256,7 @@ func TestRequestStatsSummariesAndCharts(t *testing.T) {
 	}
 
 	var hourStats testRequestStatsResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/stats?range=1h", "", http.StatusOK, &hourStats)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/stats?range=1h", "", http.StatusOK, &hourStats)
 	if hourStats.Range != "1h" {
 		t.Fatalf("hour stats range = %q, want %q", hourStats.Range, "1h")
 	}

@@ -536,6 +536,9 @@ func (s *store) migrate(ctx context.Context) error {
 	if err := s.ensureProxyRequestSentRequestColumns(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureAuthTables(ctx); err != nil {
+		return err
+	}
 
 	return nil
 }

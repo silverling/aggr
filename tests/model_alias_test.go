@@ -68,14 +68,16 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	secondaryUpstream := newModelAliasUpstreamServer(t, "Secondary")
 	defer secondaryUpstream.Close()
 
-	gatewayURL := newTestGatewayServer(t)
-	createNamedTestProvider(t, gatewayURL, "Primary", primaryUpstream.URL+"/v1", "PrimaryAgent/1.0")
-	secondaryProvider := createNamedTestProvider(t, gatewayURL, "Secondary", secondaryUpstream.URL+"/v1", "SecondaryAgent/1.0")
+	gatewayURL, client := newTestGatewayServer(t)
+	createNamedTestProvider(t, client, gatewayURL, "Primary", primaryUpstream.URL+"/v1", "PrimaryAgent/1.0")
+	secondaryProvider := createNamedTestProvider(t, client, gatewayURL, "Secondary", secondaryUpstream.URL+"/v1", "SecondaryAgent/1.0")
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Alias test key")
+	v1Client := newAuthenticatedAPIClient(client, apiKey)
 
 	var createdAliasPayload testModelAliasCreateResponse
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodPost,
 		gatewayURL+"/api/model-aliases",
 		`{"aliasModelId":"team-gateway","targetModelId":"gpt-4.1"}`,
@@ -101,7 +103,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-aliases/"+formatInt64(createdAliasPayload.Alias.ID),
 		`{"aliasModelId":"team-gateway","targetModelId":"gpt-4.1","targetProviderId":`+formatInt64(secondaryProvider.ID)+`}`,
@@ -120,7 +122,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	}
 
 	var aliasesPayload testModelAliasesResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/model-aliases", "", http.StatusOK, &aliasesPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/model-aliases", "", http.StatusOK, &aliasesPayload)
 	if len(aliasesPayload.Aliases) != 1 {
 		t.Fatalf("alias count = %d, want 1", len(aliasesPayload.Aliases))
 	}
@@ -132,7 +134,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	}
 
 	var modelsPayload testOpenAIModelsResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
+	doJSONRequest(t, v1Client, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
 	if !containsOpenAIModel(modelsPayload.Data, "team-gateway", []string{"Secondary"}) {
 		t.Fatalf("openai models payload = %#v, want team-gateway routed only to Secondary", modelsPayload.Data)
 	}
@@ -140,7 +142,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	var chatPayload map[string]any
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"team-gateway","messages":[{"role":"user","content":"hello"}]}`,
@@ -155,7 +157,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	}
 
 	var modelDetailPayload map[string]any
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/v1/models/team-gateway", "", http.StatusOK, &modelDetailPayload)
+	doJSONRequest(t, v1Client, http.MethodGet, gatewayURL+"/v1/models/team-gateway", "", http.StatusOK, &modelDetailPayload)
 	if modelDetailPayload["provider"] != "Secondary" {
 		t.Fatalf("model detail routed provider = %v, want Secondary", modelDetailPayload["provider"])
 	}
@@ -164,7 +166,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	}
 
 	var logsPayload testProxyRequestsResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
 	if len(logsPayload.Requests) < 3 {
 		t.Fatalf("request log count = %d, want at least 3", len(logsPayload.Requests))
 	}
@@ -191,7 +193,7 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodDelete,
 		gatewayURL+"/api/model-aliases/"+formatInt64(createdAliasPayload.Alias.ID),
 		"",
@@ -199,12 +201,12 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 		nil,
 	)
 
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/model-aliases", "", http.StatusOK, &aliasesPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/model-aliases", "", http.StatusOK, &aliasesPayload)
 	if len(aliasesPayload.Aliases) != 0 {
 		t.Fatalf("alias count after delete = %d, want 0", len(aliasesPayload.Aliases))
 	}
 
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
+	doJSONRequest(t, v1Client, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
 	if containsOpenAIModel(modelsPayload.Data, "team-gateway", nil) {
 		t.Fatalf("openai models payload after delete = %#v, want no team-gateway alias", modelsPayload.Data)
 	}

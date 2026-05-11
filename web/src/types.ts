@@ -1,5 +1,40 @@
 export type NoticeTone = 'success' | 'error' | 'info'
 
+export interface AuthSessionView {
+	id: number
+	userAgent?: string
+	remoteAddr?: string
+	createdAt: string
+	lastSeenAt: string
+	current: boolean
+}
+
+export interface AuthSessionStateResponse {
+	authenticated: boolean
+	session?: AuthSessionView
+}
+
+export interface AuthSessionsPayload {
+	sessions: AuthSessionView[]
+}
+
+export interface GatewayApiKeyView {
+	id: number
+	name: string
+	keyPrefix: string
+	createdAt: string
+	lastUsedAt?: string
+}
+
+export interface GatewayApiKeysPayload {
+	apiKeys: GatewayApiKeyView[]
+}
+
+export interface CreateGatewayApiKeyResponse {
+	apiKey: string
+	key: GatewayApiKeyView
+}
+
 export interface ProviderView {
 	id: number
 	name: string

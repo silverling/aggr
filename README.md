@@ -19,6 +19,7 @@ go run ./server/cmd/aggr
 ```
 
 The server listens on `:8080` by default and stores data in `aggr.db`.
+Set `AGGR_ACCESS_KEY` in your `.env` file before starting the server.
 
 ### Web UI in development
 
@@ -60,6 +61,11 @@ go build ./server/cmd/aggr
 
 - `AGGR_ADDR`: server listen address, default `:8080`
 - `AGGR_DB_PATH`: SQLite file path, default `aggr.db`
+- `AGGR_ACCESS_KEY`: shared access key required for the Web UI and admin APIs
 - `AGGR_ENV`: set to `dev` to default the UI to the Vite dev server
 - `AGGR_WEB_DEV_URL`: optional Vite dev server URL, default `http://127.0.0.1:5173` when `AGGR_ENV=dev`
 - `VITE_API_PROXY_TARGET`: optional Vite proxy target, default `http://127.0.0.1:8080`
+
+After you sign in to the Web UI with the shared access key, create gateway API
+keys there and use them as `Authorization: Bearer ...` credentials for the
+server's `/v1` endpoints.

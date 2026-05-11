@@ -25,6 +25,9 @@ type Config struct {
 	Addr string
 	// DatabasePath is the filesystem path for the SQLite database file.
 	DatabasePath string
+	// AccessKey is the shared secret required to log in to the Web UI and
+	// administrative APIs.
+	AccessKey string
 	// Environment records whether the process is running in production or dev mode.
 	Environment string
 	// WebDevURL points at the Vite dev server when the UI should be proxied live.
@@ -86,6 +89,10 @@ type syncAllResponse struct {
 // newServer constructs the application, applies database migrations, and wires
 // together the API handlers with their supporting clients.
 func newServer(cfg Config, db *sql.DB, logger *slog.Logger) (*server, error) {
+	if strings.TrimSpace(cfg.AccessKey) == "" {
+		return nil, errors.New("access key is required")
+	}
+
 	st := newStore(db)
 	if err := st.migrate(context.Background()); err != nil {
 		return nil, err
@@ -131,6 +138,14 @@ func NewHandler(cfg Config, db *sql.DB, logger *slog.Logger) (http.Handler, erro
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /api/auth/session", s.handleAuthSession)
+	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("GET /api/auth/sessions", s.handleListAuthSessions)
+	mux.HandleFunc("DELETE /api/auth/sessions/{id}", s.handleDeleteAuthSession)
+	mux.HandleFunc("GET /api/auth/api-keys", s.handleListGatewayAPIKeys)
+	mux.HandleFunc("POST /api/auth/api-keys", s.handleCreateGatewayAPIKey)
+	mux.HandleFunc("DELETE /api/auth/api-keys/{id}", s.handleDeleteGatewayAPIKey)
 	mux.HandleFunc("GET /api/providers", s.handleListProviders)
 	mux.HandleFunc("POST /api/providers", s.handleCreateProvider)
 	mux.HandleFunc("PUT /api/providers/{id}", s.handleUpdateProvider)
@@ -150,7 +165,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/v1/", s.handleProxyOpenAI)
 	mux.HandleFunc("/", s.handleUI)
 
-	return s.withLogging(s.withCORS(mux))
+	return s.withLogging(s.withCORS(s.withAuth(mux)))
 }
 
 // handleHealth returns a small JSON payload used for liveness and readiness probes.
@@ -544,6 +559,10 @@ func Run() error {
 		Level: slog.LevelInfo,
 	}))
 
+	if err := loadDotEnvFile(".env"); err != nil {
+		return fmt.Errorf("load .env: %w", err)
+	}
+
 	cfg := loadConfig()
 
 	db, err := sql.Open("sqlite", cfg.DatabasePath)
@@ -591,6 +610,7 @@ func loadConfig() Config {
 	return Config{
 		Addr:         getenv("AGGR_ADDR", ":8080"),
 		DatabasePath: getenv("AGGR_DB_PATH", "aggr.db"),
+		AccessKey:    strings.TrimSpace(os.Getenv("AGGR_ACCESS_KEY")),
 		Environment:  environment,
 		WebDevURL:    webDevURL,
 	}
@@ -602,6 +622,55 @@ func getenv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// loadDotEnvFile reads a simple `.env` file from disk and populates the
+// process environment without overwriting values that are already set.
+func loadDotEnvFile(path string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read dotenv file: %w", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set dotenv variable %s: %w", key, err)
+		}
+	}
+
+	return nil
 }
 
 // handleUI serves the dev proxy during local development and the embedded HTML in production.

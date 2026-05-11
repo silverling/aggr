@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
+import ApiKeyCard from './components/ApiKeyCard.vue'
 import ModelCard from './components/ModelCard.vue'
 import ModelAliasCard from './components/ModelAliasCard.vue'
 import StatsSection from './components/StatsSection.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import RequestLogCard from './components/RequestLogCard.vue'
 import StatCard from './components/StatCard.vue'
+import SessionCard from './components/SessionCard.vue'
 import type {
+	AuthSessionStateResponse,
+	AuthSessionView,
 	DeleteProxyRequestsPayload,
 	ModelAliasView,
 	ModelAliasesPayload,
 	ModelDisableRuleSelection,
 	ModelRoute,
+	CreateGatewayApiKeyResponse,
+	GatewayApiKeyView,
+	GatewayApiKeysPayload,
 	ModelsPayload,
 	NoticeTone,
 	RequestStatsView,
@@ -22,14 +29,32 @@ import type {
 	ProxyRequestsPayload,
 	StatsRangeOption,
 	SetModelDisableRulePayload,
+	AuthSessionsPayload,
 } from './types'
+
+const accessKeyForm = reactive({
+	accessKey: '',
+})
+
+const apiKeyForm = reactive({
+	name: '',
+})
 
 const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
 const modelAliases = ref<ModelAliasView[]>([])
 const requestLogs = ref<ProxyRequestLogView[]>([])
+const authState = ref<AuthSessionStateResponse | null>(null)
+const sessions = ref<AuthSessionView[]>([])
+const apiKeys = ref<GatewayApiKeyView[]>([])
+const generatedApiKey = ref<CreateGatewayApiKeyResponse | null>(null)
 const stats = ref<RequestStatsView | null>(null)
+const booting = ref(true)
 const loading = ref(false)
+const loggingIn = ref(false)
+const creatingApiKey = ref(false)
+const deletingSessionId = ref<number | null>(null)
+const deletingApiKeyId = ref<number | null>(null)
 const statsLoading = ref(false)
 const saving = ref(false)
 const aliasSaving = ref(false)
@@ -77,9 +102,12 @@ const modelCount = computed(() => models.value.length)
 const modelAliasCount = computed(() => modelAliases.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
+const sessionCount = computed(() => sessions.value.length)
+const apiKeyCount = computed(() => apiKeys.value.length)
 const statsError = ref('')
 const isEditing = computed(() => editingProviderId.value !== null)
 const isEditingModelAlias = computed(() => editingModelAliasId.value !== null)
+const isAuthenticated = computed(() => authState.value?.authenticated ?? false)
 const enabledProviderOptions = computed(() => providers.value.filter((provider) => provider.enabled))
 const selectedAliasTargetProvider = computed(() => {
 	if (modelAliasForm.targetProviderId === '') {
@@ -222,6 +250,50 @@ function resetModelAliasForm() {
 	modelAliasForm.targetProviderId = ''
 }
 
+function resetGeneratedApiKey() {
+	generatedApiKey.value = null
+	apiKeyForm.name = ''
+}
+
+function resetProtectedState() {
+	providers.value = []
+	models.value = []
+	modelAliases.value = []
+	requestLogs.value = []
+	sessions.value = []
+	apiKeys.value = []
+	stats.value = null
+	statsError.value = ''
+	statsLoading.value = false
+	loading.value = false
+	resetForm()
+	resetModelAliasForm()
+	resetRequestLogFilters()
+	resetGeneratedApiKey()
+	selectedModelDisableRule.value = null
+}
+
+function setLoggedOutState() {
+	authState.value = {
+		authenticated: false,
+	}
+	resetProtectedState()
+}
+
+function isStatusError(error: unknown, status: number) {
+	return error instanceof Error && (error as Error & { status?: number }).status === status
+}
+
+function handleAuthError(error: unknown) {
+	if (!isStatusError(error, 401)) {
+		return false
+	}
+
+	setLoggedOutState()
+	setNotice('error', 'Your session expired. Sign in again.')
+	return true
+}
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 	const response = await fetch(input, init)
 	const isJSON = response.headers.get('content-type')?.includes('application/json')
@@ -229,10 +301,78 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
 
 	if (!response.ok) {
 		const message = payload && typeof payload.error === 'string' ? payload.error : `${response.status} ${response.statusText}`
-		throw new Error(message)
+		const error = new Error(message) as Error & { status?: number }
+		error.status = response.status
+		throw error
 	}
 
 	return payload as T
+}
+
+async function loadSessionState() {
+	booting.value = true
+	clearNotice()
+
+	try {
+		const payload = await request<AuthSessionStateResponse>('/api/auth/session')
+		authState.value = payload
+
+		if (!payload.authenticated) {
+			resetProtectedState()
+			return
+		}
+
+		await loadDashboard()
+	} catch (error) {
+		setLoggedOutState()
+		setNotice('error', error instanceof Error ? error.message : 'Failed to load the current session.')
+	} finally {
+		booting.value = false
+	}
+}
+
+async function submitLogin() {
+	loggingIn.value = true
+	clearNotice()
+
+	try {
+		const payload = await request<AuthSessionStateResponse>('/api/auth/login', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				accessKey: accessKeyForm.accessKey,
+			}),
+		})
+
+		authState.value = payload
+		accessKeyForm.accessKey = ''
+		await loadDashboard()
+		setNotice('success', 'Signed in successfully.')
+	} catch (error) {
+		setNotice('error', error instanceof Error ? error.message : 'Failed to sign in.')
+	} finally {
+		loggingIn.value = false
+	}
+}
+
+async function logout() {
+	clearNotice()
+
+	try {
+		await request('/api/auth/logout', {
+			method: 'POST',
+		})
+	} catch (error) {
+		if (!isStatusError(error, 401)) {
+			setNotice('error', error instanceof Error ? error.message : 'Failed to sign out.')
+			return
+		}
+	}
+
+	setLoggedOutState()
+	setNotice('info', 'Signed out.')
 }
 
 async function loadDashboard(showNotice = false) {
@@ -240,16 +380,20 @@ async function loadDashboard(showNotice = false) {
 	clearNotice()
 
 	try {
-		const [providerPayload, modelPayload, aliasPayload, requestPayload] = await Promise.all([
+		const [providerPayload, modelPayload, aliasPayload, requestPayload, sessionsPayload, apiKeysPayload] = await Promise.all([
 			request<ProvidersPayload>('/api/providers'),
 			request<ModelsPayload>('/api/models'),
 			request<ModelAliasesPayload>('/api/model-aliases'),
 			request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`),
+			request<AuthSessionsPayload>('/api/auth/sessions'),
+			request<GatewayApiKeysPayload>('/api/auth/api-keys'),
 		])
 		providers.value = providerPayload.providers
 		models.value = modelPayload.models
 		modelAliases.value = aliasPayload.aliases
 		requestLogs.value = requestPayload.requests
+		sessions.value = sessionsPayload.sessions
+		apiKeys.value = apiKeysPayload.apiKeys
 		reconcileSelectedModelDisableRule()
 		reconcileEditingModelAlias()
 		await loadStats()
@@ -258,15 +402,133 @@ async function loadDashboard(showNotice = false) {
 			setNotice('info', 'Dashboard refreshed.')
 		}
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
+
 		setNotice('error', error instanceof Error ? error.message : 'Failed to load dashboard.')
 	} finally {
 		loading.value = false
 	}
 }
 
+async function submitGatewayAPIKey() {
+	creatingApiKey.value = true
+	clearNotice()
+
+	try {
+		const payload = await request<CreateGatewayApiKeyResponse>('/api/auth/api-keys', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				name: apiKeyForm.name,
+			}),
+		})
+		generatedApiKey.value = payload
+		apiKeyForm.name = ''
+		await loadDashboard()
+		setNotice('success', `Created API key "${payload.key.name}".`)
+	} catch (error) {
+		if (isStatusError(error, 401)) {
+			setLoggedOutState()
+			setNotice('error', 'Your session expired. Sign in again.')
+			return
+		}
+
+		setNotice('error', error instanceof Error ? error.message : 'Failed to create an API key.')
+	} finally {
+		creatingApiKey.value = false
+	}
+}
+
+async function copyGeneratedAPIKey() {
+	if (generatedApiKey.value === null) {
+		return
+	}
+
+	try {
+		await navigator.clipboard.writeText(generatedApiKey.value.apiKey)
+		setNotice('success', 'API key copied to the clipboard.')
+	} catch {
+		setNotice('error', 'Clipboard access is unavailable in this browser.')
+	}
+}
+
+async function revokeGatewayAPIKey(apiKey: GatewayApiKeyView) {
+	if (!window.confirm(`Revoke API key "${apiKey.name}"?`)) {
+		return
+	}
+
+	deletingApiKeyId.value = apiKey.id
+	clearNotice()
+
+	try {
+		await request(`/api/auth/api-keys/${apiKey.id}`, {
+			method: 'DELETE',
+		})
+		if (generatedApiKey.value?.key.id === apiKey.id) {
+			resetGeneratedApiKey()
+		}
+		await loadDashboard()
+		setNotice('success', `Revoked API key "${apiKey.name}".`)
+	} catch (error) {
+		if (isStatusError(error, 401)) {
+			setLoggedOutState()
+			setNotice('error', 'Your session expired. Sign in again.')
+			return
+		}
+
+		setNotice('error', error instanceof Error ? error.message : `Failed to revoke API key "${apiKey.name}".`)
+	} finally {
+		deletingApiKeyId.value = null
+	}
+}
+
+async function revokeSession(session: AuthSessionView) {
+	if (!window.confirm(`Revoke session #${session.id}?`)) {
+		return
+	}
+
+	deletingSessionId.value = session.id
+	clearNotice()
+
+	try {
+		await request(`/api/auth/sessions/${session.id}`, {
+			method: 'DELETE',
+		})
+
+		if (session.current) {
+			setLoggedOutState()
+			setNotice('info', 'The current session was revoked. Sign in again to continue.')
+			return
+		}
+
+		await loadDashboard()
+		setNotice('success', `Revoked session #${session.id}.`)
+	} catch (error) {
+		if (isStatusError(error, 401)) {
+			setLoggedOutState()
+			setNotice('error', 'Your session expired. Sign in again.')
+			return
+		}
+
+		setNotice('error', error instanceof Error ? error.message : `Failed to revoke session #${session.id}.`)
+	} finally {
+		deletingSessionId.value = null
+	}
+}
+
 let statsRequestVersion = 0
 
 async function loadStats() {
+	if (!isAuthenticated.value) {
+		stats.value = null
+		statsLoading.value = false
+		return
+	}
+
 	const requestVersion = ++statsRequestVersion
 	statsLoading.value = true
 	statsError.value = ''
@@ -279,6 +541,11 @@ async function loadStats() {
 		stats.value = payload
 	} catch (error) {
 		if (requestVersion !== statsRequestVersion) {
+			return
+		}
+		if (isStatusError(error, 401)) {
+			setLoggedOutState()
+			setNotice('error', 'Your session expired. Sign in again.')
 			return
 		}
 		statsError.value = error instanceof Error ? error.message : 'Failed to load stats.'
@@ -335,6 +602,9 @@ async function submitProvider() {
 		await loadDashboard()
 		setNotice('success', method === 'POST' ? 'Provider created and synced.' : 'Provider updated and synced.')
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : 'Failed to save provider.')
 	} finally {
 		saving.value = false
@@ -352,6 +622,9 @@ async function syncProvider(provider: ProviderView) {
 		await loadDashboard()
 		setNotice('success', `Synced models for ${provider.name}.`)
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : `Failed to sync ${provider.name}.`)
 	} finally {
 		syncingProviderId.value = null
@@ -369,6 +642,9 @@ async function syncAll() {
 		await loadDashboard()
 		setNotice('success', 'Synced every provider catalog.')
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : 'Failed to sync providers.')
 	} finally {
 		syncingAll.value = false
@@ -403,6 +679,9 @@ async function removeProvider(provider: ProviderView) {
 		await loadDashboard()
 		setNotice('success', `Deleted ${provider.name}.`)
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : `Failed to delete ${provider.name}.`)
 	}
 }
@@ -431,6 +710,9 @@ async function submitModelAlias() {
 		await loadDashboard()
 		setNotice('success', method === 'POST' ? 'Model alias created.' : 'Model alias updated.')
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : 'Failed to save model alias.')
 	} finally {
 		aliasSaving.value = false
@@ -456,6 +738,9 @@ async function removeModelAlias(alias: ModelAliasView) {
 		await loadDashboard()
 		setNotice('success', `Deleted ${alias.aliasModelId}.`)
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : `Failed to delete ${alias.aliasModelId}.`)
 	}
 }
@@ -528,6 +813,9 @@ async function applyModelDisableRule() {
 				: `Re-enabled ${selection.modelId} for ${selection.providerName}.`,
 		)
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : 'Failed to update the model disable rule.')
 	} finally {
 		applyingModelDisableRule.value = false
@@ -571,6 +859,9 @@ async function clearLogs() {
 
 		setNotice('success', `Deleted ${payload.deleted} request log${payload.deleted === 1 ? '' : 's'}.`)
 	} catch (error) {
+		if (handleAuthError(error)) {
+			return
+		}
 		setNotice('error', error instanceof Error ? error.message : 'Failed to clear request logs.')
 	} finally {
 		clearingLogs.value = false
@@ -582,14 +873,76 @@ watch(statsRange, () => {
 })
 
 onMounted(() => {
-	loadDashboard()
+	void loadSessionState()
 })
 </script>
 
 <template>
 	<Toaster richColors position="top-right" />
 	<div data-anchor="dashboard" class="mx-auto grid w-[min(1240px,calc(100vw-32px))] gap-[22px] py-8 max-lg:w-[calc(100vw-24px)] max-lg:py-4">
-		<header
+		<div
+			v-if="booting"
+			class="grid gap-6 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-[34px]"
+		>
+			<div class="grid gap-3">
+				<p class="text-xs font-bold uppercase tracking-[0.1em] text-accent">Loading</p>
+				<h1>Aggr</h1>
+				<p class="max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">Checking your login session and loading the dashboard…</p>
+			</div>
+		</div>
+
+		<div
+			v-else-if="!isAuthenticated"
+			data-anchor="auth-login"
+			class="grid gap-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:p-[34px]"
+		>
+			<div class="grid gap-4">
+				<div class="max-w-[760px]">
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Access control</p>
+					<h1>Aggr</h1>
+					<p class="mt-4 max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">
+						Sign in with the shared access key to manage providers, inspect traffic, and issue gateway API keys.
+					</p>
+				</div>
+
+				<div class="rounded-[var(--radius-card)] border border-line bg-surface-strong p-4.5">
+					<p class="text-sm font-bold uppercase tracking-[0.14em] text-accent-strong">How it works</p>
+					<ul class="mt-4 grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
+						<li>The access key comes from <code class="font-mono text-ink-strong">AGGR_ACCESS_KEY</code> in the <code class="font-mono text-ink-strong">.env</code> file.</li>
+						<li>Browser sessions are stored in SQLite and shown below after login.</li>
+						<li>Bare `/v1` requests need a gateway API key created in this dashboard.</li>
+					</ul>
+				</div>
+			</div>
+
+			<form class="grid gap-4 rounded-[var(--radius-card)] border border-line bg-surface-strong p-4.5" @submit.prevent="submitLogin">
+				<div>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Login</p>
+					<h2>Enter the shared access key</h2>
+				</div>
+				<label class="grid gap-2">
+					<span class="text-[0.92rem] font-bold text-ink-strong">Access key</span>
+					<input
+						v-model.trim="accessKeyForm.accessKey"
+						class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+						type="password"
+						autocomplete="current-password"
+						placeholder="Enter the shared access key"
+						required
+					/>
+				</label>
+				<button
+					class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+					type="submit"
+					:disabled="loggingIn"
+				>
+					{{ loggingIn ? 'Signing in…' : 'Sign in' }}
+				</button>
+			</form>
+		</div>
+
+		<template v-else>
+			<header
 			data-anchor="hero"
 			class="grid gap-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-[34px]"
 		>
@@ -599,6 +952,9 @@ onMounted(() => {
 				<p class="mt-4 max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">
 					Store provider credentials in SQLite, discover their model catalogs, and proxy each request to the provider that actually serves the
 					requested model.
+				</p>
+				<p class="mt-3 text-sm text-ink-soft">
+					{{ authState?.session ? `Current session #${authState.session.id}` : 'Logged in and ready.' }}
 				</p>
 			</div>
 
@@ -619,6 +975,13 @@ onMounted(() => {
 				>
 					{{ syncingAll ? 'Syncing catalogs…' : 'Sync all providers' }}
 				</button>
+				<button
+					class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+					type="button"
+					@click="logout"
+				>
+					Sign out
+				</button>
 			</div>
 
 			<div class="grid gap-[18px] md:grid-cols-2 xl:grid-cols-4">
@@ -637,6 +1000,126 @@ onMounted(() => {
 			:error="statsError"
 			@update:range="updateStatsRange"
 		/>
+
+		<section
+			data-anchor="auth-management"
+			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+		>
+			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+				<div>
+					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Access control</p>
+					<h2>Browser sessions and API keys</h2>
+					<p class="mt-1.5 leading-[1.6] text-ink-soft">
+						Browser sessions unlock the admin UI; gateway API keys are required for `/v1` requests.
+					</p>
+				</div>
+				<span class="text-ink-soft">{{ sessionCount }} sessions / {{ apiKeyCount }} API keys</span>
+			</div>
+
+			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+				<article data-anchor="api-key-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+					<div>
+						<h3>Create gateway API keys</h3>
+						<p class="mt-1.5 leading-[1.6] text-ink-soft">
+							Use these bearer tokens when calling the gateway&apos;s OpenAI-like `/v1` endpoints.
+						</p>
+					</div>
+
+					<form class="grid gap-4" @submit.prevent="submitGatewayAPIKey">
+						<label class="grid gap-2">
+							<span class="text-[0.92rem] font-bold text-ink-strong">Key name</span>
+							<input
+								v-model.trim="apiKeyForm.name"
+								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+								type="text"
+								autocomplete="off"
+								placeholder="Production client"
+								required
+							/>
+						</label>
+
+						<button
+							class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+							type="submit"
+							:disabled="creatingApiKey"
+						>
+							{{ creatingApiKey ? 'Creating…' : 'Create API key' }}
+						</button>
+					</form>
+
+					<div
+						v-if="generatedApiKey"
+						data-anchor="api-key-reveal"
+						class="grid gap-3 rounded-[18px] border border-accent-soft bg-accent-soft p-4"
+					>
+						<div>
+							<p class="text-xs font-bold uppercase tracking-[0.1em] text-accent">Shown once</p>
+							<h3 class="mt-1">Copy this key now</h3>
+						</div>
+						<code class="wrap-break-word rounded-[16px] border border-line bg-white/75 px-3.5 py-3 text-[0.84rem] text-ink">{{ generatedApiKey.apiKey }}</code>
+						<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="button"
+								@click="copyGeneratedAPIKey"
+							>
+								Copy key
+							</button>
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="button"
+								@click="resetGeneratedApiKey"
+							>
+								Dismiss
+							</button>
+						</div>
+					</div>
+
+					<p
+						v-if="apiKeys.length === 0"
+						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+					>
+						No gateway API keys have been created yet.
+					</p>
+
+					<div v-else class="grid gap-3">
+						<ApiKeyCard
+							v-for="apiKey in apiKeys"
+							:key="apiKey.id"
+							:api-key="apiKey"
+							:deleting="deletingApiKeyId === apiKey.id"
+							@delete="revokeGatewayAPIKey(apiKey)"
+						/>
+					</div>
+				</article>
+
+				<article data-anchor="session-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+					<div>
+						<h3>Logged in sessions</h3>
+						<p class="mt-1.5 leading-[1.6] text-ink-soft">
+							Each login creates a database-backed cookie session. Revoke one here to force the browser to sign in again.
+						</p>
+					</div>
+
+					<p
+						v-if="sessions.length === 0"
+						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+					>
+						No browser sessions are active yet.
+					</p>
+
+					<div v-else class="grid gap-3">
+						<SessionCard
+							v-for="session in sessions"
+							:key="session.id"
+							:session="session"
+							:deleting="deletingSessionId === session.id"
+							@delete="revokeSession(session)"
+						/>
+					</div>
+				</article>
+			</div>
+		</section>
 
 		<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
 			<article
@@ -1117,5 +1600,6 @@ onMounted(() => {
 				<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
 			</div>
 		</section>
+		</template>
 	</div>
 </template>

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,36 @@ import (
 	"github.com/silverling/aggr/server"
 	_ "modernc.org/sqlite"
 )
+
+// testAccessKey is the shared secret used by the integration tests to log in
+// to the Web UI and administrative APIs.
+const testAccessKey = "test-access-key"
+
+// authorizationRoundTripper injects a bearer API key into every outbound
+// request so tests can call the gateway's `/v1` endpoints.
+type authorizationRoundTripper struct {
+	// base is the transport used after the Authorization header is injected.
+	base http.RoundTripper
+	// apiKey is the raw bearer token added to outbound requests.
+	apiKey string
+}
+
+// RoundTrip clones the request, injects the bearer token, and forwards it to
+// the wrapped transport.
+func (roundTripper *authorizationRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header = req.Header.Clone()
+	if clone.Header.Get("Authorization") == "" {
+		clone.Header.Set("Authorization", "Bearer "+roundTripper.apiKey)
+	}
+
+	base := roundTripper.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+
+	return base.RoundTrip(clone)
+}
 
 // testProviderCreateResponse mirrors the subset of the provider create payload
 // that the integration test needs from the admin API.
@@ -118,6 +149,13 @@ type testDeleteProxyRequestsResponse struct {
 	Deleted int64 `json:"deleted"`
 }
 
+// testGatewayAPIKeyCreateResponse mirrors the create payload returned by the
+// gateway API-key admin endpoint.
+type testGatewayAPIKeyCreateResponse struct {
+	// APIKey contains the raw bearer token that the server only returns once.
+	APIKey string `json:"apiKey"`
+}
+
 // TestGatewayRequestLogsAndDeletion verifies that `/v1` traffic is audited and
 // that the admin API can clear logs by provider and by date range.
 func TestGatewayRequestLogsAndDeletion(t *testing.T) {
@@ -154,9 +192,11 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	gatewayURL := newTestGatewayServer(t)
+	gatewayURL, client := newTestGatewayServer(t)
 	const userAgent = "AggrTest/1.0"
-	provider := createTestProvider(t, gatewayURL, upstream.URL+"/v1", userAgent)
+	provider := createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", userAgent)
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Request log test key")
+	v1Client := newAuthenticatedAPIClient(client, apiKey)
 
 	if provider.UserAgent != userAgent {
 		t.Fatalf("provider user agent = %q, want %q", provider.UserAgent, userAgent)
@@ -170,12 +210,12 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 
 	var modelsPayload map[string]any
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
+	doJSONRequest(t, v1Client, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusOK, &modelsPayload)
 
 	var completionPayload map[string]any
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		v1Client,
 		http.MethodPost,
 		gatewayURL+"/v1/chat/completions",
 		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,
@@ -191,7 +231,7 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 
 	var logsPayload testProxyRequestsResponse
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
 
 	if len(logsPayload.Requests) != 2 {
 		t.Fatalf("expected 2 request logs, got %d", len(logsPayload.Requests))
@@ -255,7 +295,7 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	var providerDeletePayload testDeleteProxyRequestsResponse
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodDelete,
 		gatewayURL+"/api/requests?providerId="+strconv.FormatInt(provider.ID, 10),
 		"",
@@ -266,7 +306,7 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 		t.Fatalf("provider delete count = %d, want 1", providerDeletePayload.Deleted)
 	}
 
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
 	if len(logsPayload.Requests) != 1 {
 		t.Fatalf("expected 1 request log after provider delete, got %d", len(logsPayload.Requests))
 	}
@@ -278,7 +318,7 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	var dateDeletePayload testDeleteProxyRequestsResponse
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodDelete,
 		gatewayURL+"/api/requests?from="+modelsRequestedAt+"&to="+modelsRequestedAt,
 		"",
@@ -289,25 +329,26 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 		t.Fatalf("date delete count = %d, want 1", dateDeletePayload.Deleted)
 	}
 
-	doJSONRequest(t, http.DefaultClient, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
 	if len(logsPayload.Requests) != 0 {
 		t.Fatalf("expected 0 request logs after date delete, got %d", len(logsPayload.Requests))
 	}
 }
 
 // newTestGatewayServer starts the aggr HTTP handler against a temporary SQLite
-// database and returns the base URL that tests can call.
-func newTestGatewayServer(t *testing.T) string {
+// database and returns the base URL together with an authenticated admin client.
+func newTestGatewayServer(t *testing.T) (string, *http.Client) {
 	t.Helper()
 
-	gatewayURL, _ := newTestGatewayServerWithDatabase(t)
-	return gatewayURL
+	gatewayURL, client, _ := newTestGatewayServerWithDatabase(t)
+	return gatewayURL, client
 }
 
 // newTestGatewayServerWithDatabase starts the aggr HTTP handler against a
-// temporary SQLite database and returns both the base URL and database handle
-// so tests can seed additional rows directly when needed.
-func newTestGatewayServerWithDatabase(t *testing.T) (string, *sql.DB) {
+// temporary SQLite database and returns the base URL, an authenticated admin
+// client, and the database handle so tests can seed additional rows directly
+// when needed.
+func newTestGatewayServerWithDatabase(t *testing.T) (string, *http.Client, *sql.DB) {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "aggr-test.db")
@@ -321,33 +362,41 @@ func newTestGatewayServerWithDatabase(t *testing.T) (string, *sql.DB) {
 
 	db.SetMaxOpenConns(1)
 
-	handler, err := server.NewHandler(server.Config{}, db, slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{})))
+	handler, err := server.NewHandler(server.Config{AccessKey: testAccessKey}, db, slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{})))
 	if err != nil {
 		t.Fatalf("create gateway handler: %v", err)
 	}
 
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
-	return httpServer.URL, db
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("create cookie jar: %v", err)
+	}
+	adminClient := &http.Client{Jar: jar}
+	loginTestClient(t, adminClient, httpServer.URL)
+
+	return httpServer.URL, adminClient, db
 }
 
 // createTestProvider inserts a provider through the public admin API so the
 // request-log integration test exercises the same flow as the Web UI.
-func createTestProvider(t *testing.T, gatewayURL string, baseURL string, userAgent string) testProviderView {
+func createTestProvider(t *testing.T, client *http.Client, gatewayURL string, baseURL string, userAgent string) testProviderView {
 	t.Helper()
 
-	return createNamedTestProvider(t, gatewayURL, "Primary", baseURL, userAgent)
+	return createNamedTestProvider(t, client, gatewayURL, "Primary", baseURL, userAgent)
 }
 
 // createNamedTestProvider inserts a named provider through the public admin API
 // so integration tests can target multiple distinct upstreams.
-func createNamedTestProvider(t *testing.T, gatewayURL string, name string, baseURL string, userAgent string) testProviderView {
+func createNamedTestProvider(t *testing.T, client *http.Client, gatewayURL string, name string, baseURL string, userAgent string) testProviderView {
 	t.Helper()
 
 	var payload testProviderCreateResponse
 	doJSONRequest(
 		t,
-		http.DefaultClient,
+		client,
 		http.MethodPost,
 		gatewayURL+"/api/providers",
 		`{"name":"`+name+`","baseUrl":"`+baseURL+`","apiKey":"test-key","userAgent":"`+userAgent+`","enabled":true}`,
@@ -366,6 +415,56 @@ func createNamedTestProvider(t *testing.T, gatewayURL string, name string, baseU
 	}
 
 	return payload.Provider
+}
+
+// createTestGatewayAPIKey creates one gateway API key through the admin API
+// and returns the raw bearer token that can be used for `/v1` requests.
+func createTestGatewayAPIKey(t *testing.T, client *http.Client, gatewayURL string, name string) string {
+	t.Helper()
+
+	var payload testGatewayAPIKeyCreateResponse
+	doJSONRequest(
+		t,
+		client,
+		http.MethodPost,
+		gatewayURL+"/api/auth/api-keys",
+		`{"name":"`+name+`"}`,
+		http.StatusCreated,
+		&payload,
+	)
+
+	if payload.APIKey == "" {
+		t.Fatalf("created API key is empty")
+	}
+
+	return payload.APIKey
+}
+
+// loginTestClient authenticates the provided client against the gateway using
+// the shared test access key.
+func loginTestClient(t *testing.T, client *http.Client, gatewayURL string) {
+	t.Helper()
+
+	doJSONRequest(
+		t,
+		client,
+		http.MethodPost,
+		gatewayURL+"/api/auth/login",
+		`{"accessKey":"`+testAccessKey+`"}`,
+		http.StatusOK,
+		nil,
+	)
+}
+
+// newAuthenticatedAPIClient clones the admin client and injects a bearer token
+// into every request.
+func newAuthenticatedAPIClient(base *http.Client, apiKey string) *http.Client {
+	clone := *base
+	clone.Transport = &authorizationRoundTripper{
+		base:   base.Transport,
+		apiKey: apiKey,
+	}
+	return &clone
 }
 
 // doJSONRequest issues one HTTP request, verifies the status code, and decodes
