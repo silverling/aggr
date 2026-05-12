@@ -28,7 +28,7 @@ Set `AGGR_ACCESS_KEY` in your `.env` file before starting the server.
 Run the backend:
 
 ```sh
-AGGR_ENV=dev AGGR_WEB_DEV_URL=http://127.0.0.1:5173 go run ./server/cmd/aggr
+AGGR_ENV=dev go run ./server/cmd/aggr
 ```
 
 Run the Vite dev server in a second terminal:
@@ -37,10 +37,7 @@ Run the Vite dev server in a second terminal:
 pnpm --dir web dev
 ```
 
-You can visit either:
-
-- `http://127.0.0.1:5173` directly, with Vite proxying API calls to the backend
-- `http://127.0.0.1:8080`, with the Go server reverse proxying the Vite UI
+Visit `http://127.0.0.1:5173`, with Vite proxying API calls to the backend.
 
 ### Production bundle
 
@@ -64,8 +61,7 @@ go build ./server/cmd/aggr
 - `AGGR_ADDR`: server listen address, default `:8080`
 - `AGGR_DB_PATH`: SQLite file path, default `aggr.db`
 - `AGGR_ACCESS_KEY`: shared access key required for the Web UI and admin APIs
-- `AGGR_ENV`: set to `dev` to default the UI to the Vite dev server
-- `AGGR_WEB_DEV_URL`: optional Vite dev server URL, default `http://127.0.0.1:5173` when `AGGR_ENV=dev`
+- `AGGR_ENV`: optional runtime label, for example `dev` during local development
 - `VITE_API_PROXY_TARGET`: optional Vite proxy target, default `http://127.0.0.1:8080`
 
 After you sign in to the Web UI with the shared access key, create gateway API

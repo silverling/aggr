@@ -11,8 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -21,8 +19,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Config captures the runtime settings for the HTTP server, SQLite database,
-// and development UI proxy.
+// Config captures the runtime settings for the HTTP server and SQLite database.
 type Config struct {
 	// Addr is the TCP listen address for the HTTP server, such as `:8080`.
 	Addr string
@@ -33,19 +30,16 @@ type Config struct {
 	AccessKey string
 	// Environment records whether the process is running in production or dev mode.
 	Environment string
-	// WebDevURL points at the Vite dev server when the UI should be proxied live.
-	WebDevURL string
 }
 
-// server owns the HTTP mux, persistence layer, upstream clients, and optional
-// dev proxy used to serve the UI in development.
+// server owns the HTTP mux, persistence layer, and upstream clients used by
+// the gateway.
 type server struct {
 	cfg         Config
 	logger      *slog.Logger
 	store       *store
 	syncClient  *http.Client
 	proxyClient *http.Client
-	devProxy    *httputil.ReverseProxy
 }
 
 // loggingResponseWriter wraps an HTTP response writer so the request logger can
@@ -127,18 +121,6 @@ func newServer(cfg Config, db *sql.DB, logger *slog.Logger) (*server, error) {
 			Timeout: 20 * time.Second,
 		},
 		proxyClient: &http.Client{},
-	}
-
-	if cfg.WebDevURL != "" {
-		parsed, err := url.Parse(cfg.WebDevURL)
-		if err != nil {
-			return nil, fmt.Errorf("parse AGGR_WEB_DEV_URL: %w", err)
-		}
-		instance.devProxy = httputil.NewSingleHostReverseProxy(parsed)
-		instance.devProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, proxyErr error) {
-			logger.Error("proxy vite dev server", "error", proxyErr)
-			writeError(w, http.StatusBadGateway, "vite dev server is unavailable")
-		}
 	}
 
 	return instance, nil
@@ -627,7 +609,6 @@ func Run() error {
 		"addr", cfg.Addr,
 		"db", cfg.DatabasePath,
 		"environment", cfg.Environment,
-		"web_dev_url", cfg.WebDevURL,
 	)
 
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -639,18 +620,11 @@ func Run() error {
 
 // loadConfig reads environment variables and fills in the defaults used to start the process.
 func loadConfig() Config {
-	environment := getenv("AGGR_ENV", "prod")
-	webDevURL := strings.TrimSpace(os.Getenv("AGGR_WEB_DEV_URL"))
-	if environment == "dev" && webDevURL == "" {
-		webDevURL = "http://127.0.0.1:5173"
-	}
-
 	return Config{
 		Addr:         getenv("AGGR_ADDR", ":8080"),
 		DatabasePath: getenv("AGGR_DB_PATH", "aggr.db"),
 		AccessKey:    strings.TrimSpace(os.Getenv("AGGR_ACCESS_KEY")),
-		Environment:  environment,
-		WebDevURL:    webDevURL,
+		Environment:  getenv("AGGR_ENV", "prod"),
 	}
 }
 
@@ -711,13 +685,8 @@ func loadDotEnvFile(path string) error {
 	return nil
 }
 
-// handleUI serves the dev proxy during local development and the embedded HTML in production.
+// handleUI serves the embedded dashboard HTML for the gateway.
 func (s *server) handleUI(w http.ResponseWriter, r *http.Request) {
-	if s.devProxy != nil {
-		s.devProxy.ServeHTTP(w, r)
-		return
-	}
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(embeddedIndexHTML))
 }
