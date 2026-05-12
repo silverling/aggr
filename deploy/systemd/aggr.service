@@ -1,0 +1,28 @@
+[Unit]
+Description=Aggr OpenAI-compatible gateway
+Documentation=https://github.com/silverling/aggr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aggr
+Group=aggr
+WorkingDirectory=/opt/aggr
+ExecStart=/opt/aggr/aggr
+Restart=on-failure
+RestartSec=5s
+
+# The server also loads .env from WorkingDirectory on startup, so keep
+# AGGR_ACCESS_KEY and other runtime settings in /opt/aggr/.env.
+Environment=HOME=/opt/aggr
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/aggr
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
