@@ -992,6 +992,13 @@ onMounted(() => {
 		<template v-else>
 			<div class="relative">
 				<SectionOutline :items="sectionOutlineItems" />
+				<PendingModelDisableRulesPanel
+					:rules="pendingModelDisableRules"
+					:applying="applyingModelDisableRule"
+					@remove-rule="removePendingModelDisableRule"
+					@clear="clearPendingModelDisableRules"
+					@apply="applyModelDisableRule"
+				/>
 
 				<div class="grid min-w-0 gap-[22px]">
 					<header
@@ -1670,13 +1677,6 @@ onMounted(() => {
 					</section>
 				</div>
 
-				<PendingModelDisableRulesPanel
-					:rules="pendingModelDisableRules"
-					:applying="applyingModelDisableRule"
-					@remove-rule="removePendingModelDisableRule"
-					@clear="clearPendingModelDisableRules"
-					@apply="applyModelDisableRule"
-				/>
 			</div>
 		</template>
 	</div>
