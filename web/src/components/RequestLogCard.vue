@@ -47,12 +47,129 @@ function formatPath(path: string, rawQuery?: string) {
 	return `${path}?${rawQuery}`
 }
 
-function formatBody(value?: string, truncated?: boolean) {
+function formatBody(value?: string, truncated?: boolean, headers?: string) {
 	if (!value) {
 		return '(empty)'
 	}
 
-	return truncated ? `${value}\n\n[truncated]` : value
+	const formatted = formatBodyByContentType(value, headers)
+	return truncated ? `${formatted}\n\n[truncated]` : formatted
+}
+
+function parseAuditHeaders(value?: string) {
+	if (!value) {
+		return null
+	}
+
+	try {
+		const parsed = JSON.parse(value) as unknown
+		if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+			return null
+		}
+
+		return parsed as Record<string, unknown>
+	} catch {
+		return null
+	}
+}
+
+function contentTypeFromHeaders(value?: string) {
+	const headers = parseAuditHeaders(value)
+	if (!headers) {
+		return ''
+	}
+
+	for (const [key, entry] of Object.entries(headers)) {
+		if (key.toLowerCase() !== 'content-type') {
+			continue
+		}
+
+		if (typeof entry === 'string' && entry.trim()) {
+			return entry.split(';', 1)[0].trim().toLowerCase()
+		}
+
+		if (Array.isArray(entry)) {
+			for (const item of entry) {
+				if (typeof item === 'string' && item.trim()) {
+					return item.split(';', 1)[0].trim().toLowerCase()
+				}
+			}
+		}
+	}
+
+	return ''
+}
+
+function isJSONContentType(value: string) {
+	return value === 'application/json' || value.endsWith('+json')
+}
+
+function prettyJSONString(value: string) {
+	try {
+		return JSON.stringify(JSON.parse(value), null, 2)
+	} catch {
+		return value
+	}
+}
+
+function formatEventStreamBody(value: string) {
+	const normalized = value.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
+
+	return normalized
+		.split('\n')
+		.map((line) => {
+			if (!line.startsWith('data:')) {
+				return line
+			}
+
+			const payload = line.slice(5).trimStart()
+			if (!payload || payload === '[DONE]') {
+				return line
+			}
+
+			const prettyPayload = prettyJSONString(payload)
+			if (prettyPayload === payload) {
+				return line
+			}
+
+			return `data: ${prettyPayload}`
+		})
+		.join('\n')
+}
+
+function formatBodyByContentType(value: string, headers?: string) {
+	const contentType = contentTypeFromHeaders(headers)
+	if (isJSONContentType(contentType)) {
+		return prettyJSONString(value)
+	}
+	if (contentType === 'text/event-stream') {
+		return formatEventStreamBody(value)
+	}
+
+	return value
+}
+
+function formatHeaders(value?: string) {
+	if (!value) {
+		return '(empty)'
+	}
+
+	const parsed = parseAuditHeaders(value)
+	if (!parsed) {
+		return value
+	}
+
+	const normalized = Object.fromEntries(
+		Object.entries(parsed).map(([key, entry]) => {
+			if (Array.isArray(entry) && entry.length === 1) {
+				return [key, entry[0]]
+			}
+
+			return [key, entry]
+		}),
+	)
+
+	return JSON.stringify(normalized, null, 2)
 }
 </script>
 
@@ -73,15 +190,15 @@ function formatBody(value?: string, truncated?: boolean) {
 					</div>
 
 					<div
-						class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-ink-soft [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1"
+						class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-ink-soft [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1 font-mono"
 					>
-						<span v-if="props.requestLog.modelId"><Package class="inline size-4" /> {{ props.requestLog.modelId }}</span>
-						<span v-if="props.requestLog.providerName"><Building2 class="inline size-4" /> {{ props.requestLog.providerName }}</span>
 						<span><ClockArrowUp class="inline size-4" /> {{ formatTimestamp(props.requestLog.requestedAt) }}</span>
-						<span v-if="props.requestLog.completedAt"
-							><ClockCheck class="inline size-4" /> {{ formatTimestamp(props.requestLog.completedAt) }}</span
-						>
+						<span v-if="props.requestLog.completedAt">
+							<ClockCheck class="inline size-4" /> {{ formatTimestamp(props.requestLog.completedAt) }}
+						</span>
 						<span v-if="props.requestLog.durationMs !== undefined"><Clock class="inline size-4" />{{ props.requestLog.durationMs }} ms</span>
+						<span v-if="props.requestLog.providerName"><Building2 class="inline size-4" /> {{ props.requestLog.providerName }}</span>
+						<span v-if="props.requestLog.modelId"><Package class="inline size-4" /> {{ props.requestLog.modelId }}</span>
 					</div>
 				</div>
 
@@ -118,15 +235,15 @@ function formatBody(value?: string, truncated?: boolean) {
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Headers</span>
 						<pre
-							class="m-0 overflow-x-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ props.requestLog.receivedRequest.headers }}</code></pre>
+							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+						><code>{{ formatHeaders(props.requestLog.receivedRequest.headers) }}</code></pre>
 					</div>
 
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Body</span>
 						<pre
-							class="m-0 overflow-x-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ formatBody(props.requestLog.receivedRequest.body, props.requestLog.receivedRequest.bodyTruncated) }}</code></pre>
+							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+						><code>{{ formatBody(props.requestLog.receivedRequest.body, props.requestLog.receivedRequest.bodyTruncated, props.requestLog.receivedRequest.headers) }}</code></pre>
 					</div>
 				</section>
 
@@ -146,15 +263,15 @@ function formatBody(value?: string, truncated?: boolean) {
 						<div class="grid gap-2">
 							<span class="text-sm font-bold text-ink-strong">Headers</span>
 							<pre
-								class="m-0 overflow-x-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-							><code>{{ props.requestLog.sentRequest.headers }}</code></pre>
+								class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+							><code>{{ formatHeaders(props.requestLog.sentRequest.headers) }}</code></pre>
 						</div>
 
 						<div class="grid gap-2">
 							<span class="text-sm font-bold text-ink-strong">Body</span>
 							<pre
-								class="m-0 overflow-x-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-							><code>{{ formatBody(props.requestLog.sentRequest.body, props.requestLog.sentRequest.bodyTruncated) }}</code></pre>
+								class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+							><code>{{ formatBody(props.requestLog.sentRequest.body, props.requestLog.sentRequest.bodyTruncated, props.requestLog.sentRequest.headers) }}</code></pre>
 						</div>
 					</template>
 					<p v-else class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft">
@@ -173,15 +290,15 @@ function formatBody(value?: string, truncated?: boolean) {
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Headers</span>
 						<pre
-							class="m-0 overflow-x-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ formatBody(props.requestLog.receivedResponse.headers) }}</code></pre>
+							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+						><code>{{ formatHeaders(props.requestLog.receivedResponse.headers) }}</code></pre>
 					</div>
 
 					<div class="grid gap-2">
 						<span class="text-sm font-bold text-ink-strong">Body</span>
 						<pre
-							class="m-0 overflow-x-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
-						><code>{{ formatBody(props.requestLog.receivedResponse.body, props.requestLog.receivedResponse.bodyTruncated) }}</code></pre>
+							class="m-0 overflow-auto rounded-[16px] border border-line bg-white/70 p-3.5 text-[0.84rem] leading-[1.65] text-ink"
+						><code>{{ formatBody(props.requestLog.receivedResponse.body, props.requestLog.receivedResponse.bodyTruncated, props.requestLog.receivedResponse.headers) }}</code></pre>
 					</div>
 				</section>
 			</div>
