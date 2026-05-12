@@ -24,7 +24,31 @@ const maxProxyBodyBytes = 32 << 20
 
 var errModelHintMissing = errors.New("model hint missing")
 
-const openAIResponsesWebSocketPath = "/v1/responses"
+const openaiResponsesWebSocketPath = "/v1/responses"
+
+// upstreamRequestHeadersToOmit lists caller-supplied headers that should never be forwarded upstream.
+var upstreamRequestHeadersToOmit = map[string]struct{}{
+	"authorization":     {},
+	"content-length":    {},
+	"cookie":            {},
+	"host":              {},
+	"origin":            {},
+	"via":               {},
+	"x-forwarded-for":   {},
+	"x-forwarded-host":  {},
+	"x-forwarded-proto": {},
+}
+
+// openaiPlatformHeaders lists the OpenAI SDK platform property headers that should be stripped.
+var openaiPlatformHeaders = [...]string{
+	"x-stainless-arch",
+	"x-stainless-lang",
+	"x-stainless-os",
+	"x-stainless-package-version",
+	"x-stainless-retry-count",
+	"x-stainless-runtime",
+	"x-stainless-runtime-version",
+}
 
 // providerModelListResponse mirrors the upstream `/v1/models` payload.
 type providerModelListResponse struct {
@@ -33,14 +57,14 @@ type providerModelListResponse struct {
 	} `json:"data"`
 }
 
-// openAIModelListResponse is the OpenAI-style aggregated models list returned by the gateway.
-type openAIModelListResponse struct {
+// openaiModelListResponse is the OpenAI-style aggregated models list returned by the gateway.
+type openaiModelListResponse struct {
 	Object string                `json:"object"`
-	Data   []openAIModelResponse `json:"data"`
+	Data   []openaiModelResponse `json:"data"`
 }
 
-// openAIModelResponse is one entry in the aggregated models list.
-type openAIModelResponse struct {
+// openaiModelResponse is one entry in the aggregated models list.
+type openaiModelResponse struct {
 	ID        string   `json:"id"`
 	Object    string   `json:"object"`
 	Created   int64    `json:"created"`
@@ -260,14 +284,18 @@ func ResolveProviderURL(baseURL, requestPath string, rawQuery string) (string, e
 
 // newProviderClient creates an OpenAI SDK client configured for one provider and a specific HTTP transport.
 func (s *server) newProviderClient(provider providerRecord, httpClient *http.Client) openai.Client {
+	// Start with the shared base options for both catalog syncs and proxied
+	// requests.
 	options := []option.RequestOption{
 		option.WithBaseURL(provider.BaseURL),
-		option.WithAPIKey(provider.APIKey),
 		option.WithHTTPClient(httpClient),
 		option.WithMaxRetries(0),
+		option.WithAPIKey(provider.APIKey),
 	}
-	if provider.UserAgent != "" {
-		options = append(options, option.WithHeader("User-Agent", provider.UserAgent))
+
+	// Remove OpenAI SDK platform property headers.
+	for _, key := range openaiPlatformHeaders {
+		options = append(options, option.WithHeaderDel(key))
 	}
 
 	return openai.Client{
@@ -275,12 +303,14 @@ func (s *server) newProviderClient(provider providerRecord, httpClient *http.Cli
 	}
 }
 
-// buildProviderRequestOptions copies inbound headers and query parameters into SDK request options.
-func buildProviderRequestOptions(headers http.Header, query url.Values) []option.RequestOption {
+// buildProviderRequestOptions copies inbound headers and query parameters into
+// SDK request options while preserving provider-level `User-Agent` overrides.
+func buildProviderRequestOptions(provider providerRecord, headers http.Header, query url.Values) []option.RequestOption {
 	options := make([]option.RequestOption, 0, len(headers)+len(query))
 
+	// Copy necessary request headers for upstream calls.
 	for key, values := range headers {
-		if isHopByHopHeader(key) || strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "Host") || strings.EqualFold(key, "Content-Length") || strings.EqualFold(key, "User-Agent") {
+		if shouldOmitUpstreamRequestHeader(key) {
 			continue
 		}
 
@@ -290,10 +320,16 @@ func buildProviderRequestOptions(headers http.Header, query url.Values) []option
 		}
 	}
 
+	// Add query parameters from the original request to the upstream call.
 	for key, values := range query {
 		for _, value := range values {
 			options = append(options, option.WithQueryAdd(key, value))
 		}
+	}
+
+	// Override the User-Agent header with the provider-specific value if set.
+	if provider.UserAgent != "" {
+		options = append(options, option.WithHeader("User-Agent", provider.UserAgent))
 	}
 
 	return options
@@ -304,7 +340,7 @@ func buildProviderRequestOptions(headers http.Header, query url.Values) []option
 func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, providerName string, modelID string, logger *slog.Logger) proxyResponseCapture {
 	defer response.Body.Close()
 
-	copyResponseHeaders(w.Header(), response.Header)
+	CopyResponseHeaders(w.Header(), response.Header)
 	w.Header().Set("X-Aggr-Provider", providerName)
 	if modelID != "" {
 		w.Header().Set("X-Aggr-Model", modelID)
@@ -337,8 +373,8 @@ func copyUpstreamResponse(w http.ResponseWriter, response *http.Response, provid
 
 // ExtractModelHint finds the target model from the request path, query string, or JSON body.
 func ExtractModelHint(r *http.Request) (string, []byte, error) {
-	if strings.HasPrefix(r.URL.Path, "/v1/models/") {
-		modelID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/models/"))
+	if after, ok := strings.CutPrefix(r.URL.Path, "/v1/models/"); ok {
+		modelID := strings.TrimSpace(after)
 		return modelID, nil, nil
 	}
 
@@ -508,33 +544,36 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 	return body, nil
 }
 
+// persistProviderSyncError stores a provider sync error and logs any persistence failure without masking the original error.
+func (s *server) persistProviderSyncError(ctx context.Context, providerID int64, syncErr error) {
+	if persistErr := s.store.setProviderSyncError(ctx, providerID, syncErr); persistErr != nil {
+		s.logger.Error("persist provider sync error", "provider_id", providerID, "error", persistErr)
+	}
+}
+
 // syncProviderCatalog refreshes one provider's model list using the OpenAI SDK.
 func (s *server) syncProviderCatalog(ctx context.Context, provider providerRecord) error {
 	path, err := resolveProviderPath(provider.BaseURL, "/v1/models")
 	if err != nil {
-		persistErr := s.store.setProviderSyncError(ctx, provider.ID, err)
-		if persistErr != nil {
-			s.logger.Error("persist provider sync error", "provider_id", provider.ID, "error", persistErr)
-		}
+		s.persistProviderSyncError(ctx, provider.ID, err)
 		return err
 	}
 
 	client := s.newProviderClient(provider, s.syncClient)
+	options := make([]option.RequestOption, 0, 1)
+	if provider.UserAgent != "" {
+		options = append(options, option.WithHeader("User-Agent", provider.UserAgent))
+	}
+
 	var response *http.Response
-	err = client.Get(ctx, path, nil, &response)
+	err = client.Get(ctx, path, nil, &response, options...)
 	if err != nil && response == nil {
-		persistErr := s.store.setProviderSyncError(ctx, provider.ID, err)
-		if persistErr != nil {
-			s.logger.Error("persist provider sync error", "provider_id", provider.ID, "error", persistErr)
-		}
+		s.persistProviderSyncError(ctx, provider.ID, err)
 		return fmt.Errorf("sync provider catalog: %w", err)
 	}
 	if response == nil {
 		syncErr := errors.New("provider sync returned no response")
-		persistErr := s.store.setProviderSyncError(ctx, provider.ID, syncErr)
-		if persistErr != nil {
-			s.logger.Error("persist provider sync error", "provider_id", provider.ID, "error", persistErr)
-		}
+		s.persistProviderSyncError(ctx, provider.ID, syncErr)
 		return syncErr
 	}
 	defer response.Body.Close()
@@ -546,20 +585,14 @@ func (s *server) syncProviderCatalog(ctx context.Context, provider providerRecor
 
 	if response.StatusCode >= http.StatusBadRequest {
 		syncErr := fmt.Errorf("provider returned %s: %s", response.Status, strings.TrimSpace(string(body)))
-		persistErr := s.store.setProviderSyncError(ctx, provider.ID, syncErr)
-		if persistErr != nil {
-			s.logger.Error("persist provider sync error", "provider_id", provider.ID, "error", persistErr)
-		}
+		s.persistProviderSyncError(ctx, provider.ID, syncErr)
 		return syncErr
 	}
 
 	var payload providerModelListResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
 		syncErr := fmt.Errorf("decode provider models: %w", err)
-		persistErr := s.store.setProviderSyncError(ctx, provider.ID, syncErr)
-		if persistErr != nil {
-			s.logger.Error("persist provider sync error", "provider_id", provider.ID, "error", persistErr)
-		}
+		s.persistProviderSyncError(ctx, provider.ID, syncErr)
 		return syncErr
 	}
 
@@ -643,7 +676,7 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		capture: &sentRequest,
 	}
 	client := s.newProviderClient(route.Provider, &proxyClient)
-	options := buildProviderRequestOptions(r.Header, upstreamQuery)
+	options := buildProviderRequestOptions(route.Provider, r.Header, upstreamQuery)
 
 	var requestBody any
 	if len(upstreamBody) > 0 {
@@ -662,45 +695,18 @@ func (s *server) proxyOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	capture := copyUpstreamResponse(w, response, route.Provider.Name, route.RequestedModelID, s.logger)
-	errorText := ""
-	if err != nil {
-		errorText = err.Error()
-	}
-	if capture.StreamError != nil {
-		if errorText == "" {
-			errorText = capture.StreamError.Error()
-		} else {
-			errorText = fmt.Sprintf("%s; %s", errorText, capture.StreamError.Error())
-		}
-	}
-
-	s.completeProxyRequestAudit(auditContext, logID, proxyRequestLogUpdate{
-		SentMethod:            sentRequest.Method,
-		SentURL:               sentRequest.URL,
-		SentHeaders:           sentRequest.HeadersJSON,
-		SentBody:              sentRequest.Body,
-		SentBodyTruncated:     sentRequest.BodyTruncated,
-		ProviderID:            &route.Provider.ID,
-		ProviderName:          route.Provider.Name,
-		ResponseStatus:        capture.StatusCode,
-		ResponseHeaders:       capture.HeadersJSON,
-		ResponseBody:          capture.Body,
-		ResponseBodyTruncated: capture.BodyTruncated,
-		ErrorText:             errorText,
-		DurationMS:            time.Since(startedAt).Milliseconds(),
-		CompletedAt:           time.Now(),
-	})
-}
-
-// shouldHandleOpenAIResponsesWebSocket reports whether the incoming request is
-// a WebSocket upgrade targeting the Responses API websocket-mode endpoint.
-func shouldHandleOpenAIResponsesWebSocket(r *http.Request) bool {
-	if r.URL.Path != openAIResponsesWebSocketPath {
-		return false
-	}
-
-	return headerContainsToken(r.Header, "Connection", "Upgrade") &&
-		headerContainsToken(r.Header, "Upgrade", "websocket")
+	s.completeCapturedProxyRequestAudit(
+		auditContext,
+		logID,
+		sentRequest,
+		route.Provider,
+		capture.StatusCode,
+		capture.HeadersJSON,
+		capture.Body,
+		capture.BodyTruncated,
+		joinProxyErrorText(err, capture.StreamError),
+		startedAt,
+	)
 }
 
 // proxyOpenAIWebSocket accepts a client websocket for `/v1/responses`, routes
@@ -733,20 +739,14 @@ func (s *server) proxyOpenAIWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	turnState.set(turn)
 
-	upstreamURL, err := ResolveProviderURL(route.Provider.BaseURL, openAIResponsesWebSocketPath, r.URL.RawQuery)
+	upstreamURL, err := ResolveProviderURL(route.Provider.BaseURL, openaiResponsesWebSocketPath, r.URL.RawQuery)
 	if err != nil {
 		s.writeResponsesWebSocketGatewayError(ctx, clientConn, turnState.take(), err)
 		return
 	}
 
-	upstreamHeaders := cloneHeadersForWebSocket(r.Header)
-	upstreamHeaders.Del("Authorization")
-	upstreamHeaders.Del("Host")
-	upstreamHeaders.Del("Cookie")
-	upstreamHeaders.Del("Origin")
-	upstreamHeaders.Set("User-Agent", route.Provider.UserAgent)
-
-	upstreamConn, response, err := websocket.Dial(ctx, toWebSocketURL(upstreamURL), &websocket.DialOptions{
+	upstreamHeaders := buildUpstreamWebSocketHeaders(route.Provider, r.Header)
+	upstreamConn, response, err := websocket.Dial(ctx, ToWebSocketURL(upstreamURL), &websocket.DialOptions{
 		HTTPClient: s.proxyClient,
 		HTTPHeader: upstreamHeaders,
 	})
@@ -755,34 +755,20 @@ func (s *server) proxyOpenAIWebSocket(w http.ResponseWriter, r *http.Request) {
 		if response != nil && response.StatusCode > 0 {
 			status = response.StatusCode
 		}
-		s.finalizeResponsesWebSocketTurn(turnState.take(), status, nil, fmt.Sprintf("upstream websocket dial failed: %v", err))
-		_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
-			"type":    "error",
-			"code":    "upstream_websocket_dial_failed",
-			"message": fmt.Sprintf("upstream websocket dial failed: %v", err),
-			"param":   "",
-		})
+		message := fmt.Sprintf("upstream websocket dial failed: %v", err)
+		s.finalizeResponsesWebSocketTurn(turnState.take(), status, nil, message)
+		_ = writeResponsesWebSocketError(ctx, clientConn, "upstream_websocket_dial_failed", message, "")
 		_ = clientConn.Close(websocket.StatusPolicyViolation, "upstream websocket dial failed")
 		return
 	}
 	defer upstreamConn.CloseNow()
 
-	currentTurn := turnState.current()
-	currentTurn.SentRequest = proxyRequestSentCapture{
-		Method:      http.MethodGet,
-		URL:         upstreamURL,
-		HeadersJSON: headersToAuditJSON(upstreamHeaders),
-		Body:        string(initialUpstreamPayload),
-	}
+	turnState.current().SentRequest = newResponsesWebSocketSentRequestCapture(upstreamURL, upstreamHeaders, initialUpstreamPayload)
 
 	if err := upstreamConn.Write(ctx, clientMessageType, initialUpstreamPayload); err != nil {
-		s.finalizeResponsesWebSocketTurn(turnState.take(), http.StatusBadGateway, nil, fmt.Sprintf("write initial websocket frame upstream: %v", err))
-		_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
-			"type":    "error",
-			"code":    "upstream_write_failed",
-			"message": fmt.Sprintf("write initial websocket frame upstream: %v", err),
-			"param":   "",
-		})
+		message := fmt.Sprintf("write initial websocket frame upstream: %v", err)
+		s.finalizeResponsesWebSocketTurn(turnState.take(), http.StatusBadGateway, nil, message)
+		_ = writeResponsesWebSocketError(ctx, clientConn, "upstream_write_failed", message, "")
 		_ = clientConn.Close(websocket.StatusPolicyViolation, "upstream write failed")
 		return
 	}
@@ -813,36 +799,23 @@ func (s *server) proxyOpenAIWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 		if nextTurn != nil {
 			if route.Provider.ID != nextRoute.Provider.ID {
-				s.finalizeResponsesWebSocketTurn(nextTurn, http.StatusBadRequest, nil, "websocket mode cannot switch providers after the connection is established")
-				_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
-					"type":    "error",
-					"code":    "provider_switch_not_supported",
-					"message": "websocket mode cannot switch providers after the connection is established",
-					"param":   "response.model",
-				})
+				message := "websocket mode cannot switch providers after the connection is established"
+				s.finalizeResponsesWebSocketTurn(nextTurn, http.StatusBadRequest, nil, message)
+				_ = writeResponsesWebSocketError(ctx, clientConn, "provider_switch_not_supported", message, "response.model")
 				continue
 			}
 
-			nextTurn.SentRequest = proxyRequestSentCapture{
-				Method:      http.MethodGet,
-				URL:         upstreamURL,
-				HeadersJSON: headersToAuditJSON(upstreamHeaders),
-				Body:        string(nextPayload),
-			}
+			nextTurn.SentRequest = newResponsesWebSocketSentRequestCapture(upstreamURL, upstreamHeaders, nextPayload)
 			turnState.set(nextTurn)
 			payload = nextPayload
 		}
 
 		if err := upstreamConn.Write(ctx, messageType, payload); err != nil {
+			message := fmt.Sprintf("write websocket frame upstream: %v", err)
 			if pendingTurn := turnState.take(); pendingTurn != nil {
-				s.finalizeResponsesWebSocketTurn(pendingTurn, http.StatusBadGateway, nil, fmt.Sprintf("write websocket frame upstream: %v", err))
+				s.finalizeResponsesWebSocketTurn(pendingTurn, http.StatusBadGateway, nil, message)
 			}
-			_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
-				"type":    "error",
-				"code":    "upstream_write_failed",
-				"message": fmt.Sprintf("write websocket frame upstream: %v", err),
-				"param":   "",
-			})
+			_ = writeResponsesWebSocketError(ctx, clientConn, "upstream_write_failed", message, "")
 			_ = upstreamConn.Close(websocket.StatusPolicyViolation, "upstream write failed")
 			_ = clientConn.Close(websocket.StatusPolicyViolation, "upstream write failed")
 			<-upstreamDone
@@ -972,38 +945,28 @@ func (s *server) finalizeResponsesWebSocketTurn(turn *responsesWebSocketAuditTur
 	}
 
 	responseBody, responseBodyTruncated := truncateAuditBytes(responsePayload)
-	s.completeProxyRequestAudit(context.Background(), turn.LogID, proxyRequestLogUpdate{
-		SentMethod:            turn.SentRequest.Method,
-		SentURL:               turn.SentRequest.URL,
-		SentHeaders:           turn.SentRequest.HeadersJSON,
-		SentBody:              turn.SentRequest.Body,
-		SentBodyTruncated:     turn.SentRequest.BodyTruncated,
-		ProviderID:            &turn.Route.Provider.ID,
-		ProviderName:          turn.Route.Provider.Name,
-		ResponseStatus:        responseStatus,
-		ResponseHeaders:       headersToAuditJSON(responseHeaders),
-		ResponseBody:          responseBody,
-		ResponseBodyTruncated: responseBodyTruncated,
-		ErrorText:             strings.TrimSpace(errorText),
-		DurationMS:            time.Since(turn.StartedAt).Milliseconds(),
-		CompletedAt:           time.Now(),
-	})
+	s.completeCapturedProxyRequestAudit(
+		context.Background(),
+		turn.LogID,
+		turn.SentRequest,
+		turn.Route.Provider,
+		responseStatus,
+		headersToAuditJSON(responseHeaders),
+		responseBody,
+		responseBodyTruncated,
+		strings.TrimSpace(errorText),
+		turn.StartedAt,
+	)
 }
 
-// writeResponsesWebSocketGatewayError returns a gateway-generated websocket
-// error frame to the client and finalizes the current turn when one exists.
+// writeResponsesWebSocketGatewayError sends a gateway-generated websocket error event and finalizes the current turn when present.
 func (s *server) writeResponsesWebSocketGatewayError(ctx context.Context, clientConn *websocket.Conn, turn *responsesWebSocketAuditTurn, err error) {
 	message := strings.TrimSpace(err.Error())
 	if turn != nil {
 		s.finalizeResponsesWebSocketTurn(turn, http.StatusBadRequest, nil, message)
 	}
 
-	_ = writeResponsesWebSocketJSON(ctx, clientConn, map[string]any{
-		"type":    "error",
-		"code":    "gateway_error",
-		"message": message,
-		"param":   "",
-	})
+	_ = writeResponsesWebSocketError(ctx, clientConn, "gateway_error", message, "")
 }
 
 // extractResponsesWebSocketModelHint reads the requested public model name from
@@ -1070,25 +1033,38 @@ func extractResponsesWebSocketResponseError(response map[string]any) string {
 	return ""
 }
 
-// cloneHeadersForWebSocket copies request headers so websocket dials can pass
-// through supported values without mutating the inbound request.
-func cloneHeadersForWebSocket(headers http.Header) http.Header {
-	cloned := make(http.Header, len(headers))
+// buildUpstreamWebSocketHeaders clones inbound websocket headers, strips gateway-only values, and applies provider auth and User-Agent overrides.
+func buildUpstreamWebSocketHeaders(provider providerRecord, headers http.Header) http.Header {
+	// Copy necessary request headers for websocket dialing.
+	upstreamHeaders := make(http.Header, len(headers))
 	for key, values := range headers {
-		cloned[key] = append([]string(nil), values...)
+		if shouldOmitUpstreamRequestHeader(key) {
+			continue
+		}
+		upstreamHeaders[key] = append([]string(nil), values...)
 	}
-	return cloned
+
+	// Set upstream api key.
+	if strings.TrimSpace(provider.APIKey) != "" {
+		upstreamHeaders.Set("Authorization", "Bearer "+provider.APIKey)
+	}
+
+	// Overwrite User-Agent with provider override when present.
+	if provider.UserAgent != "" {
+		upstreamHeaders.Set("User-Agent", provider.UserAgent)
+	}
+
+	return upstreamHeaders
 }
 
-// toWebSocketURL converts an HTTP(S) endpoint into its websocket equivalent.
-func toWebSocketURL(raw string) string {
-	if strings.HasPrefix(raw, "https://") {
-		return "wss://" + strings.TrimPrefix(raw, "https://")
-	}
-	if strings.HasPrefix(raw, "http://") {
-		return "ws://" + strings.TrimPrefix(raw, "http://")
-	}
-	return raw
+// writeResponsesWebSocketError sends a gateway-generated Responses API error event to the websocket client.
+func writeResponsesWebSocketError(ctx context.Context, conn *websocket.Conn, code string, message string, param string) error {
+	return writeResponsesWebSocketJSON(ctx, conn, map[string]any{
+		"type":    "error",
+		"code":    code,
+		"message": message,
+		"param":   param,
+	})
 }
 
 // writeResponsesWebSocketJSON sends one JSON websocket frame to the caller.
@@ -1099,6 +1075,50 @@ func writeResponsesWebSocketJSON(ctx context.Context, conn *websocket.Conn, payl
 	}
 
 	return conn.Write(ctx, websocket.MessageText, body)
+}
+
+// newResponsesWebSocketSentRequestCapture builds the sent-request audit snapshot for one frame written to the upstream websocket.
+func newResponsesWebSocketSentRequestCapture(upstreamURL string, upstreamHeaders http.Header, payload []byte) proxyRequestSentCapture {
+	return proxyRequestSentCapture{
+		Method:      http.MethodGet,
+		URL:         upstreamURL,
+		HeadersJSON: headersToAuditJSON(upstreamHeaders),
+		Body:        string(payload),
+	}
+}
+
+// joinProxyErrorText combines request and stream failures into the single audit-log error string.
+func joinProxyErrorText(errs ...error) string {
+	parts := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		parts = append(parts, err.Error())
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+// completeCapturedProxyRequestAudit finalizes an audit row from the captured sent request and final response metadata.
+func (s *server) completeCapturedProxyRequestAudit(ctx context.Context, logID int64, sentRequest proxyRequestSentCapture, provider providerRecord, responseStatus int, responseHeaders string, responseBody string, responseBodyTruncated bool, errorText string, startedAt time.Time) {
+	providerID := provider.ID
+	s.completeProxyRequestAudit(ctx, logID, proxyRequestLogUpdate{
+		SentMethod:            sentRequest.Method,
+		SentURL:               sentRequest.URL,
+		SentHeaders:           sentRequest.HeadersJSON,
+		SentBody:              sentRequest.Body,
+		SentBodyTruncated:     sentRequest.BodyTruncated,
+		ProviderID:            &providerID,
+		ProviderName:          provider.Name,
+		ResponseStatus:        responseStatus,
+		ResponseHeaders:       responseHeaders,
+		ResponseBody:          responseBody,
+		ResponseBodyTruncated: responseBodyTruncated,
+		ErrorText:             errorText,
+		DurationMS:            time.Since(startedAt).Milliseconds(),
+		CompletedAt:           time.Now(),
+	})
 }
 
 // set replaces the currently active websocket turn.
@@ -1136,8 +1156,8 @@ func (state *responsesWebSocketTurnState) clearCurrent(logID int64) {
 }
 
 // toOpenAIModels converts the aggregated route table into the OpenAI models-list response shape.
-func toOpenAIModels(routeModels []routeModelView) openAIModelListResponse {
-	data := make([]openAIModelResponse, 0, len(routeModels))
+func toOpenAIModels(routeModels []routeModelView) openaiModelListResponse {
+	data := make([]openaiModelResponse, 0, len(routeModels))
 	for _, routeModel := range routeModels {
 		providers := make([]string, 0, len(routeModel.Providers))
 		for _, provider := range routeModel.Providers {
@@ -1145,7 +1165,7 @@ func toOpenAIModels(routeModels []routeModelView) openAIModelListResponse {
 		}
 		slices.Sort(providers)
 
-		data = append(data, openAIModelResponse{
+		data = append(data, openaiModelResponse{
 			ID:        routeModel.ID,
 			Object:    "model",
 			Created:   time.Now().Unix(),
@@ -1154,42 +1174,19 @@ func toOpenAIModels(routeModels []routeModelView) openAIModelListResponse {
 		})
 	}
 
-	return openAIModelListResponse{
+	return openaiModelListResponse{
 		Object: "list",
 		Data:   data,
 	}
 }
 
-// copyResponseHeaders copies non-hop-by-hop headers from an upstream response.
-func copyResponseHeaders(dst, src http.Header) {
-	for key, values := range src {
-		if isHopByHopHeader(key) {
-			continue
-		}
-		dst[key] = append([]string(nil), values...)
-	}
-}
-
-// isHopByHopHeader reports whether a header should be stripped when proxying responses.
-func isHopByHopHeader(name string) bool {
-	switch strings.ToLower(name) {
-	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+// shouldOmitUpstreamRequestHeader reports whether a header should never be
+// forwarded to a proxied upstream request.
+func shouldOmitUpstreamRequestHeader(name string) bool {
+	if IsHopByHopHeader(name) {
 		return true
-	default:
-		return false
-	}
-}
-
-// headerContainsToken reports whether a comma-delimited header contains the
-// provided token, ignoring ASCII case and optional surrounding whitespace.
-func headerContainsToken(headers http.Header, name string, token string) bool {
-	for _, rawValue := range headers.Values(name) {
-		for _, part := range strings.Split(rawValue, ",") {
-			if strings.EqualFold(strings.TrimSpace(part), token) {
-				return true
-			}
-		}
 	}
 
-	return false
+	_, ok := upstreamRequestHeadersToOmit[strings.ToLower(name)]
+	return ok
 }

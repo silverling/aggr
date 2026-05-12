@@ -545,7 +545,7 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	body, err := encodeJSONPayload(toOpenAIModels(models))
+	body, err := EncodeJSONPayload(toOpenAIModels(models))
 	if err != nil {
 		s.writeLoggedProxyError(w, auditContext, logID, startedAt, nil, nil, http.StatusInternalServerError, err.Error())
 		return
@@ -567,7 +567,10 @@ func (s *server) handleListOpenAIModels(w http.ResponseWriter, r *http.Request) 
 
 // handleProxyOpenAI forwards OpenAI-compatible requests to the provider that serves the requested model.
 func (s *server) handleProxyOpenAI(w http.ResponseWriter, r *http.Request) {
-	if shouldHandleOpenAIResponsesWebSocket(r) {
+	// Support websocket-based OpenAI responses API.
+	if r.URL.Path == openaiResponsesWebSocketPath &&
+		HeaderContainsToken(r.Header, "Connection", "Upgrade") &&
+		HeaderContainsToken(r.Header, "Upgrade", "websocket") {
 		s.proxyOpenAIWebSocket(w, r)
 		return
 	}
