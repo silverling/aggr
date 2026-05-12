@@ -41,14 +41,14 @@ function bucketTitle(bucket: RequestStatsBucket) {
 
 <template>
 	<article data-anchor="token-usage-chart" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-		<div class="flex items-start justify-between gap-3">
-			<div>
-				<h3>{{ props.title }}</h3>
-				<p class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
-			</div>
-			<span class="rounded-full border border-line bg-white/70 px-3 py-1.5 font-mono text-[0.8rem] font-bold text-ink-strong">
-				Max {{ formatCompactNumber(maxConsumedTokens) }}
-			</span>
+		<div class="grid gap-1">
+			<h3 class="flex justify-between items-center">
+				<span>{{ props.title }}</span>
+				<span class="ml-auto rounded-full border border-line bg-white/70 px-3 py-1.5 font-mono text-[0.8rem] font-bold text-ink-strong">
+					Max {{ formatCompactNumber(maxConsumedTokens) }}
+				</span>
+			</h3>
+			<p class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
 		</div>
 
 		<div class="flex flex-wrap items-center gap-3 text-sm text-ink-soft">
@@ -68,34 +68,33 @@ function bucketTitle(bucket: RequestStatsBucket) {
 
 		<div
 			v-if="props.buckets.length > 0"
-			class="grid min-h-[260px] items-end gap-3"
+			class="grid min-h-65 items-end gap-3"
 			:style="{ gridTemplateColumns: `repeat(${props.buckets.length}, minmax(0, 1fr))` }"
 		>
 			<div v-for="bucket in props.buckets" :key="bucket.start" class="grid gap-2">
 				<span class="text-center font-mono text-[0.78rem] text-ink-soft">{{
 					bucket.consumedTokens === 0 ? '0' : formatCompactNumber(bucket.consumedTokens)
 				}}</span>
+
 				<div
-					class="relative flex h-[190px] items-end justify-center rounded-[18px] border border-line bg-[rgba(255,255,255,0.52)] px-2 pb-2 pt-4"
+					class="mx-auto flex h-47.5 w-full max-w-12 flex-col justify-end overflow-hidden rounded-xs bg-[rgba(24,34,47,0.05)]"
 					:title="bucketTitle(bucket)"
 				>
-					<div class="flex h-full w-full max-w-[42px] flex-col justify-end overflow-hidden rounded-[14px] bg-[rgba(24,34,47,0.05)]">
-						<div
-							v-if="bucket.outputTokens > 0"
-							class="w-full bg-[rgba(200,93,53,0.86)]"
-							:style="{ height: segmentHeight(bucket.outputTokens) }"
-						></div>
-						<div
-							v-if="bucket.cachedInputTokens > 0"
-							class="w-full bg-[rgba(12,118,98,0.32)]"
-							:style="{ height: segmentHeight(bucket.cachedInputTokens) }"
-						></div>
-						<div
-							v-if="bucket.nonCachedInputTokens > 0"
-							class="w-full bg-accent"
-							:style="{ height: segmentHeight(bucket.nonCachedInputTokens) }"
-						></div>
-					</div>
+					<div
+						v-if="bucket.outputTokens > 0"
+						class="w-full bg-[rgba(200,93,53,0.86)]"
+						:style="{ height: segmentHeight(bucket.outputTokens) }"
+					></div>
+					<div
+						v-if="bucket.cachedInputTokens > 0"
+						class="w-full bg-[rgba(12,118,98,0.32)]"
+						:style="{ height: segmentHeight(bucket.cachedInputTokens) }"
+					></div>
+					<div
+						v-if="bucket.nonCachedInputTokens > 0"
+						class="w-full bg-accent"
+						:style="{ height: segmentHeight(bucket.nonCachedInputTokens) }"
+					></div>
 				</div>
 				<div class="grid gap-1 text-center">
 					<span class="font-mono text-[0.8rem] font-bold text-ink-strong">{{ bucket.label }}</span>

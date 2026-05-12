@@ -104,9 +104,9 @@ watch(
 </script>
 
 <template>
-	<aside class="absolute bottom-0 left-[-244px] top-0 z-20 hidden w-[220px] min-[1848px]:block" aria-label="Dashboard section outline">
+	<aside class="absolute bottom-0 -left-61 top-0 z-20 hidden w-55 min-[1848px]:block" aria-label="Dashboard section outline">
 		<div
-			class="sticky top-6 w-[220px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]"
+			class="sticky top-6 w-55 rounded-3xl border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]"
 		>
 			<p class="px-2.5 pb-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Outline</p>
 			<nav class="grid gap-1.5">
@@ -114,10 +114,10 @@ watch(
 					v-for="item in props.items"
 					:key="item.anchor"
 					:class="[
-						'group flex w-full items-center justify-between gap-3 rounded-[18px] px-2.5 py-2.5 text-left transition duration-150 ease-out',
+						'group flex w-full items-center justify-between gap-3 rounded-[16px] pl-4 pr-2.5 py-2.5 text-left transition duration-150 ease-out',
 						activeAnchor === item.anchor
 							? 'bg-[linear-gradient(135deg,rgba(12,118,98,0.14),rgba(200,93,53,0.09))] text-ink-strong shadow-[inset_0_0_0_1px_rgba(12,118,98,0.18)]'
-							: 'text-ink-soft hover:bg-white/60 hover:text-ink-strong',
+							: 'text-ink-soft hover:bg-black/5 hover:text-ink-strong',
 					]"
 					type="button"
 					@click="scrollToAnchor(item.anchor)"
@@ -131,11 +131,11 @@ watch(
 									: 'bg-[rgba(24,34,47,0.16)] group-hover:bg-accent/70',
 							]"
 						/>
-						<span class="text-[0.94rem] font-bold leading-[1.25]">{{ item.label }}</span>
+						<span class="text-[0.94rem] font-bold leading-tight">{{ item.label }}</span>
 					</span>
 					<span
 						:class="[
-							'text-[0.72rem] uppercase tracking-[0.18em] transition duration-150 ease-out',
+							'text-[0.72rem] uppercase tracking-[0.18em] transition duration-150 ease-out font-mono',
 							activeAnchor === item.anchor ? 'text-accent' : 'text-ink-soft/70 group-hover:text-accent',
 						]"
 					>
