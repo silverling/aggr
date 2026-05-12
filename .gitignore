@@ -2,5 +2,5 @@
 *.db
 *.db-shm
 *.db-wal
-server/internal/webui/dist/
+dist
 *.env*
