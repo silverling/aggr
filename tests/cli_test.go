@@ -31,8 +31,14 @@ func TestCLIHelpFlag(t *testing.T) {
 	if !strings.Contains(output, "--version") {
 		t.Fatalf("stdout = %q, want version flag description", output)
 	}
+	if !strings.Contains(output, "upgrade") {
+		t.Fatalf("stdout = %q, want upgrade command guidance", output)
+	}
 	if !strings.Contains(output, "AGGR_ACCESS_KEY") {
 		t.Fatalf("stdout = %q, want environment variable guidance", output)
+	}
+	if !strings.Contains(output, "AGGR_GITHUB_REPO") {
+		t.Fatalf("stdout = %q, want GitHub repository override guidance", output)
 	}
 	if !strings.Contains(output, ".env file") {
 		t.Fatalf("stdout = %q, want .env guidance", output)

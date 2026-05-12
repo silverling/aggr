@@ -7,21 +7,33 @@ import (
 	"strings"
 )
 
+// cliOptions stores the parsed command-line mode selected by the caller.
+type cliOptions struct {
+	// ShowHelp reports whether the caller requested usage text and an immediate exit.
+	ShowHelp bool
+	// ShowVersion reports whether the caller requested the build version and an immediate exit.
+	ShowVersion bool
+	// Upgrade reports whether the caller requested an in-place binary self-upgrade.
+	Upgrade bool
+}
+
 // RunCLI parses the supported command-line flags, writes the requested output,
 // and starts the HTTP server when no immediate-exit flag is present.
 func RunCLI(args []string, stdout io.Writer, stderr io.Writer) error {
-	showHelp, showVersion, err := parseCLIFlags(args)
+	options, err := parseCLIFlags(args)
 	if err != nil {
 		writeCLIUsage(stderr)
 		return fmt.Errorf("parse CLI flags: %w", err)
 	}
 
 	switch {
-	case showHelp:
+	case options.ShowHelp:
 		writeCLIUsage(stdout)
 		return nil
-	case showVersion:
+	case options.ShowVersion:
 		return writeCLIVersion(stdout)
+	case options.Upgrade:
+		return runSelfUpgrade(stdout)
 	default:
 		return Run()
 	}
@@ -29,7 +41,7 @@ func RunCLI(args []string, stdout io.Writer, stderr io.Writer) error {
 
 // parseCLIFlags parses the supported command-line flags and rejects unexpected
 // positional arguments so startup behavior stays explicit.
-func parseCLIFlags(args []string) (bool, bool, error) {
+func parseCLIFlags(args []string) (cliOptions, error) {
 	parser := flag.NewFlagSet("aggr", flag.ContinueOnError)
 	parser.SetOutput(io.Discard)
 
@@ -38,14 +50,27 @@ func parseCLIFlags(args []string) (bool, bool, error) {
 	showVersion := parser.Bool("version", false, "Show version and exit.")
 
 	if err := parser.Parse(args); err != nil {
-		return false, false, err
+		return cliOptions{}, err
 	}
 
-	if parser.NArg() > 0 {
-		return false, false, fmt.Errorf("unexpected positional arguments: %s", strings.Join(parser.Args(), " "))
+	options := cliOptions{
+		ShowHelp:    *showHelp,
+		ShowVersion: *showVersion,
 	}
 
-	return *showHelp, *showVersion, nil
+	switch parser.NArg() {
+	case 0:
+		return options, nil
+	case 1:
+		if parser.Arg(0) != "upgrade" {
+			return cliOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(parser.Args(), " "))
+		}
+
+		options.Upgrade = true
+		return options, nil
+	default:
+		return cliOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(parser.Args(), " "))
+	}
 }
 
 // writeCLIUsage writes the gateway command usage summary to the provided
@@ -57,7 +82,7 @@ func writeCLIUsage(writer io.Writer) {
 
 	_, _ = fmt.Fprintf(
 		writer,
-		"Usage: aggr [--help] [--version]\n\nOptions:\n  --help     Show usage and exit.\n  --version  Show version and exit.\n\nEnvironment:\n  AGGR_ACCESS_KEY  Shared access key required for Web UI and /api access.\n  AGGR_ADDR        HTTP listen address. Default: :8080\n  AGGR_DB_PATH     SQLite database path. Default: aggr.db\n  AGGR_ENV         Runtime environment label. Default: prod\n\nConfiguration:\n  Environment variables can be set in the shell or in a local .env file.\n  Example:\n    AGGR_ACCESS_KEY=change-me\n    AGGR_ADDR=:8080\n    AGGR_DB_PATH=aggr.db\n",
+		"Usage: aggr [--help] [--version] [upgrade]\n\nOptions:\n  --help     Show usage and exit.\n  --version  Show version and exit.\n  upgrade    Download the latest GitHub release and replace this binary.\n\nEnvironment:\n  AGGR_ACCESS_KEY   Shared access key required for Web UI and /api access.\n  AGGR_ADDR         HTTP listen address. Default: :8080\n  AGGR_DB_PATH      SQLite database path. Default: aggr.db\n  AGGR_ENV          Runtime environment label. Default: prod\n  AGGR_GITHUB_REPO  Optional release repository override for upgrade. Default: silverling/aggr\n\nConfiguration:\n  Environment variables can be set in the shell or in a local .env file.\n  Example:\n    AGGR_ACCESS_KEY=change-me\n    AGGR_ADDR=:8080\n    AGGR_DB_PATH=aggr.db\n",
 	)
 }
 

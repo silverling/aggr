@@ -1,4 +1,4 @@
-.PHONY: build go-build test dev web-dev web-build fmt tidy
+.PHONY: build go-build test dev web-dev web-build fmt tidy release-linux-amd64 release-linux-arm64
 
 VERSION ?= $(shell ./scripts/build-version.sh)
 GO_LDFLAGS := -X github.com/silverling/aggr/server.buildVersion=$(VERSION)
@@ -27,3 +27,9 @@ fmt:
 
 tidy:
 	go mod tidy
+
+release-linux-amd64:
+	VERSION="$(VERSION)" ./scripts/package-release.sh linux amd64
+
+release-linux-arm64:
+	VERSION="$(VERSION)" ./scripts/package-release.sh linux arm64

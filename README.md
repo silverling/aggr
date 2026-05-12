@@ -14,6 +14,28 @@
 
 ## Run it
 
+## Install
+
+Install the latest release on a Linux host with systemd in one line:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/silverling/aggr/main/install.sh | sudo bash
+```
+
+That downloads the latest GitHub release, installs `aggr` to `/opt/aggr`,
+installs the systemd unit, generates `AGGR_ACCESS_KEY` with
+`openssl rand -hex 32` when needed, and starts the service.
+
+To install from a fork instead, set `AGGR_GITHUB_REPO=owner/repo` before
+running the installer.
+
+After install:
+
+- The systemd service is `aggr`
+- The environment file is `/opt/aggr/.env`
+- The generated access key is printed once by the installer
+- Check status with `sudo systemctl status aggr`
+
 ### Backend
 
 ```sh
@@ -28,6 +50,7 @@ The binary also supports:
 ```sh
 ./aggr --help
 ./aggr --version
+./aggr upgrade
 ```
 
 ### Web UI in development
@@ -69,6 +92,25 @@ If you want to run the steps manually, build the Web UI before any Go build:
 pnpm --dir web build
 go build ./server/cmd/aggr
 ```
+
+### Upgrade an installed binary
+
+Run:
+
+```sh
+aggr upgrade
+```
+
+That downloads the latest GitHub release for the current platform and replaces
+the current executable in place. If `aggr` is running under systemd, restart it
+afterward:
+
+```sh
+sudo systemctl restart aggr
+```
+
+Set `AGGR_GITHUB_REPO=owner/repo` first if the binary should upgrade from a
+different GitHub repository.
 
 ## Environment variables
 
