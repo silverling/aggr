@@ -4,9 +4,11 @@ import { Toaster, toast } from 'vue-sonner'
 import ApiKeyCard from './components/ApiKeyCard.vue'
 import ModelCard from './components/ModelCard.vue'
 import ModelAliasCard from './components/ModelAliasCard.vue'
+import PendingModelDisableRulesPanel from './components/PendingModelDisableRulesPanel.vue'
 import StatsSection from './components/StatsSection.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import RequestLogCard from './components/RequestLogCard.vue'
+import SectionOutline from './components/SectionOutline.vue'
 import StatCard from './components/StatCard.vue'
 import SessionCard from './components/SessionCard.vue'
 import type {
@@ -15,7 +17,6 @@ import type {
 	DeleteProxyRequestsPayload,
 	ModelAliasView,
 	ModelAliasesPayload,
-	ModelDisableRuleSelection,
 	ModelRoute,
 	CreateGatewayApiKeyResponse,
 	GatewayApiKeyView,
@@ -27,9 +28,11 @@ import type {
 	ProvidersPayload,
 	ProxyRequestLogView,
 	ProxyRequestsPayload,
+	SectionOutlineItem,
 	StatsRangeOption,
 	SetModelDisableRulePayload,
 	AuthSessionsPayload,
+	PendingModelDisableRule,
 } from './types'
 
 const accessKeyForm = reactive({
@@ -64,7 +67,7 @@ const editingProviderId = ref<number | null>(null)
 const editingModelAliasId = ref<number | null>(null)
 const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
-const selectedModelDisableRule = ref<ModelDisableRuleSelection | null>(null)
+const pendingModelDisableRules = ref<PendingModelDisableRule[]>([])
 const requestLogLimit = 40
 const statsRange = ref('24h')
 const statsRangeOptions: StatsRangeOption[] = [
@@ -73,6 +76,19 @@ const statsRangeOptions: StatsRangeOption[] = [
 	{ value: '7d', label: 'In a week' },
 	{ value: '30d', label: 'In a month' },
 	{ value: 'all', label: 'All' },
+]
+
+const sectionOutlineItems: SectionOutlineItem[] = [
+	{ anchor: 'hero', label: 'Overview', shortLabel: '01' },
+	{ anchor: 'request-stats', label: 'Stats', shortLabel: '02' },
+	{ anchor: 'auth-management', label: 'Access control', shortLabel: '03' },
+	{ anchor: 'provider-config', label: 'Provider config', shortLabel: '04' },
+	{ anchor: 'quick-start', label: 'Quick start', shortLabel: '05' },
+	{ anchor: 'model-disable-rules', label: 'Disable rules', shortLabel: '06' },
+	{ anchor: 'model-aliases', label: 'Model aliases', shortLabel: '07' },
+	{ anchor: 'providers', label: 'Providers', shortLabel: '08' },
+	{ anchor: 'models', label: 'Models', shortLabel: '09' },
+	{ anchor: 'request-logs', label: 'Request audit', shortLabel: '10' },
 ]
 
 const form = reactive({
@@ -159,22 +175,7 @@ const activeModelDisableRules = computed(() =>
 			return left.providerName.localeCompare(right.providerName)
 		}),
 )
-const selectedModelDisableRuleProvider = computed(() => {
-	if (selectedModelDisableRule.value === null) {
-		return null
-	}
-
-	return providers.value.find((provider) => provider.id === selectedModelDisableRule.value?.providerId) ?? null
-})
-const selectedModelDisableRuleExists = computed(() => {
-	const selection = selectedModelDisableRule.value
-	const provider = selectedModelDisableRuleProvider.value
-	if (selection === null || provider === null) {
-		return false
-	}
-
-	return provider.disabledModels.includes(selection.modelId)
-})
+const pendingModelDisableRuleCount = computed(() => pendingModelDisableRules.value.length)
 const featuredModel = computed(() => models.value[0]?.id ?? 'gpt-4.1')
 const curlExample = computed(() =>
 	[
@@ -203,23 +204,41 @@ function setNotice(tone: NoticeTone, text: string) {
 
 function clearNotice() {}
 
-function reconcileSelectedModelDisableRule() {
-	const selection = selectedModelDisableRule.value
-	if (selection === null) {
-		return
+function findProvider(providerId: number) {
+	return providers.value.find((provider) => provider.id === providerId) ?? null
+}
+
+function hasActiveModelDisableRule(providerId: number, modelId: string) {
+	const provider = findProvider(providerId)
+	if (provider === null) {
+		return false
 	}
 
-	const provider = providers.value.find((candidate) => candidate.id === selection.providerId)
-	if (provider === undefined || !provider.models.includes(selection.modelId)) {
-		selectedModelDisableRule.value = null
-		return
-	}
+	return provider.disabledModels.includes(modelId)
+}
 
-	selectedModelDisableRule.value = {
-		providerId: provider.id,
-		providerName: provider.name,
-		modelId: selection.modelId,
-	}
+function pendingModelDisableRuleIndex(providerId: number, modelId: string) {
+	return pendingModelDisableRules.value.findIndex((rule) => rule.providerId === providerId && rule.modelId === modelId)
+}
+
+function pendingModelDisableRuleFor(providerId: number, modelId: string) {
+	return pendingModelDisableRules.value.find((rule) => rule.providerId === providerId && rule.modelId === modelId) ?? null
+}
+
+function reconcilePendingModelDisableRules() {
+	pendingModelDisableRules.value = pendingModelDisableRules.value.flatMap((rule) => {
+		const provider = findProvider(rule.providerId)
+		if (provider === null || !provider.models.includes(rule.modelId)) {
+			return []
+		}
+
+		return [
+			{
+				...rule,
+				providerName: provider.name,
+			},
+		]
+	})
 }
 
 function reconcileEditingModelAlias() {
@@ -270,7 +289,7 @@ function resetProtectedState() {
 	resetModelAliasForm()
 	resetRequestLogFilters()
 	resetGeneratedApiKey()
-	selectedModelDisableRule.value = null
+	pendingModelDisableRules.value = []
 }
 
 function setLoggedOutState() {
@@ -394,7 +413,7 @@ async function loadDashboard(showNotice = false) {
 		requestLogs.value = requestPayload.requests
 		sessions.value = sessionsPayload.sessions
 		apiKeys.value = apiKeysPayload.apiKeys
-		reconcileSelectedModelDisableRule()
+		reconcilePendingModelDisableRules()
 		reconcileEditingModelAlias()
 		await loadStats()
 
@@ -651,12 +670,23 @@ async function syncAll() {
 	}
 }
 
-function selectModelDisableRule(provider: Pick<ProviderView, 'id' | 'name'>, modelId: string) {
-	selectedModelDisableRule.value = {
-		providerId: provider.id,
-		providerName: provider.name,
-		modelId,
+function toggleModelDisableRule(provider: Pick<ProviderView, 'id' | 'name'>, modelId: string) {
+	const existingIndex = pendingModelDisableRuleIndex(provider.id, modelId)
+	if (existingIndex >= 0) {
+		pendingModelDisableRules.value.splice(existingIndex, 1)
+		clearNotice()
+		return
 	}
+
+	pendingModelDisableRules.value = [
+		...pendingModelDisableRules.value,
+		{
+			providerId: provider.id,
+			providerName: provider.name,
+			modelId,
+			disabled: !hasActiveModelDisableRule(provider.id, modelId),
+		},
+	]
 	clearNotice()
 }
 
@@ -745,8 +775,17 @@ async function removeModelAlias(alias: ModelAliasView) {
 	}
 }
 
-function clearSelectedModelDisableRule() {
-	selectedModelDisableRule.value = null
+function removePendingModelDisableRule(rule: PendingModelDisableRule) {
+	const existingIndex = pendingModelDisableRuleIndex(rule.providerId, rule.modelId)
+	if (existingIndex < 0) {
+		return
+	}
+
+	pendingModelDisableRules.value.splice(existingIndex, 1)
+}
+
+function clearPendingModelDisableRules() {
+	pendingModelDisableRules.value = []
 }
 
 function updateStatsRange(value: string) {
@@ -782,16 +821,20 @@ async function copyGatewayBase() {
 }
 
 async function applyModelDisableRule() {
-	const selection = selectedModelDisableRule.value
-	const provider = selectedModelDisableRuleProvider.value
-	if (selection === null || provider === null) {
+	if (pendingModelDisableRules.value.length === 0) {
 		return
 	}
 
 	applyingModelDisableRule.value = true
 	clearNotice()
-
-	const nextDisabled = !selectedModelDisableRuleExists.value
+	const pendingRules = [...pendingModelDisableRules.value]
+	const payload: SetModelDisableRulePayload = {
+		rules: pendingRules.map((rule) => ({
+			providerId: rule.providerId,
+			modelId: rule.modelId,
+			disabled: rule.disabled,
+		})),
+	}
 
 	try {
 		await request<SetModelDisableRulePayload>('/api/model-disable-rules', {
@@ -799,18 +842,20 @@ async function applyModelDisableRule() {
 			headers: {
 				'Content-Type': 'application/json',
 			},
-			body: JSON.stringify({
-				providerId: selection.providerId,
-				modelId: selection.modelId,
-				disabled: nextDisabled,
-			}),
+			body: JSON.stringify(payload),
 		})
+		const disabledCount = pendingRules.filter((rule) => rule.disabled).length
+		const enabledCount = pendingRules.length - disabledCount
 		await loadDashboard()
+		clearPendingModelDisableRules()
 		setNotice(
 			'success',
-			nextDisabled
-				? `Disabled ${selection.modelId} for ${selection.providerName}.`
-				: `Re-enabled ${selection.modelId} for ${selection.providerName}.`,
+			[
+				disabledCount > 0 ? `Disabled ${disabledCount} route${disabledCount === 1 ? '' : 's'}` : '',
+				enabledCount > 0 ? `re-enabled ${enabledCount} route${enabledCount === 1 ? '' : 's'}` : '',
+			]
+				.filter((part) => part !== '')
+				.join(' and ') + '.',
 		)
 	} catch (error) {
 		if (handleAuthError(error)) {
@@ -942,10 +987,21 @@ onMounted(() => {
 		</div>
 
 		<template v-else>
-			<header
-			data-anchor="hero"
-			class="grid gap-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-[34px]"
-		>
+			<div
+				:class="[
+					'xl:grid xl:gap-6',
+					pendingModelDisableRuleCount > 0
+						? 'xl:grid-cols-[220px_minmax(0,1fr)_280px]'
+						: 'xl:grid-cols-[220px_minmax(0,1fr)]',
+				]"
+			>
+				<SectionOutline :items="sectionOutlineItems" />
+
+				<div class="grid min-w-0 gap-[22px]">
+					<header
+						data-anchor="hero"
+						class="grid gap-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-[34px]"
+					>
 			<div class="max-w-[760px]">
 				<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Unified gateway</p>
 				<h1>Aggr</h1>
@@ -990,21 +1046,21 @@ onMounted(() => {
 				<StatCard label="Aliases" :value="modelAliasCount" description="Public model names mapped to upstream targets" />
 				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
 			</div>
-		</header>
+					</header>
 
-		<StatsSection
-			:stats="stats"
-			:range="statsRange"
-			:range-options="statsRangeOptions"
-			:loading="statsLoading"
-			:error="statsError"
-			@update:range="updateStatsRange"
-		/>
+					<StatsSection
+						:stats="stats"
+						:range="statsRange"
+						:range-options="statsRangeOptions"
+						:loading="statsLoading"
+						:error="statsError"
+						@update:range="updateStatsRange"
+					/>
 
-		<section
-			data-anchor="auth-management"
-			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-		>
+					<section
+						data-anchor="auth-management"
+						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+					>
 			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 				<div>
 					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Access control</p>
@@ -1119,9 +1175,9 @@ onMounted(() => {
 					</div>
 				</article>
 			</div>
-		</section>
+					</section>
 
-		<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+					<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
 			<article
 				data-anchor="provider-config"
 				class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
@@ -1229,78 +1285,84 @@ onMounted(() => {
 					<li>Providers sync automatically after create or update, and you can resync at any time.</li>
 				</ul>
 			</article>
-		</section>
+					</section>
 
-		<section
-			data-anchor="model-disable-rules"
-			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-		>
+					<section
+						data-anchor="model-disable-rules"
+						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+					>
 			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 				<div>
 					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model disable rules</p>
-					<h2>Block one provider for one model</h2>
+					<h2>Stage provider/model route changes</h2>
 				</div>
-				<span class="text-ink-soft">{{ activeModelDisableRules.length }} active rule{{ activeModelDisableRules.length === 1 ? '' : 's' }}</span>
+				<span class="text-ink-soft">{{ pendingModelDisableRuleCount }} staged / {{ activeModelDisableRules.length }} active</span>
 			</div>
 
-			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-				<article data-anchor="model-disable-rule-pending" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+				<article data-anchor="model-disable-rule-guide" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
 					<div>
-						<h3>Pending change</h3>
+						<h3>How to use it</h3>
 						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							Click a provider chip in a model card or a model chip in a provider card, then apply the rule to disable or re-enable that
-							specific route.
+							Click a provider chip in a model card or a model chip in a provider card to stage the inverse of its current route state.
+							Apply staged changes together from the floating pending card.
 						</p>
 					</div>
 
-					<div v-if="selectedModelDisableRule" class="flex flex-wrap items-center gap-2.5">
-						<span
-							class="inline-flex items-center rounded-full border border-line bg-white/70 px-3 py-2 font-mono text-[0.82rem] font-bold text-ink-strong"
-						>
-							{{ selectedModelDisableRule.providerName }}
-						</span>
-						<span class="text-sm text-ink-soft">for</span>
-						<span
-							class="inline-flex items-center rounded-full border border-line bg-white/70 px-3 py-2 font-mono text-[0.82rem] font-bold text-ink-strong"
-						>
-							{{ selectedModelDisableRule.modelId }}
-						</span>
-					</div>
-					<p v-else class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft">
-						No provider/model pair is selected yet.
-					</p>
+					<ul class="grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
+						<li>Red queued chips will create disable rules.</li>
+						<li>Green queued chips will remove existing disable rules.</li>
+						<li>Click the same chip again to unstage it before applying.</li>
+					</ul>
 
-					<p
-						v-if="selectedModelDisableRule"
-						:class="[
-							'rounded-[16px] px-3.5 py-3 leading-[1.6]',
-							selectedModelDisableRuleExists ? 'bg-danger-soft text-danger' : 'bg-[rgba(12,118,98,0.08)] text-accent',
-						]"
+					<div
+						v-if="pendingModelDisableRuleCount === 0"
+						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft xl:hidden"
 					>
-						{{
-							selectedModelDisableRuleExists
-								? 'This provider is currently disabled for the selected model.'
-								: 'This provider currently participates in routing for the selected model.'
-						}}
-					</p>
+						No pending route changes are staged yet.
+					</div>
 
-					<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-						<button
-							class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-							type="button"
-							:disabled="selectedModelDisableRule === null || applyingModelDisableRule"
-							@click="applyModelDisableRule"
+					<div v-else class="grid gap-3 xl:hidden">
+						<div
+							v-for="rule in pendingModelDisableRules"
+							:key="`${rule.providerId}:${rule.modelId}`"
+							class="rounded-[18px] border border-line bg-white/80 p-3"
 						>
-							{{ applyingModelDisableRule ? 'Applying…' : selectedModelDisableRuleExists ? 'Remove disable rule' : 'Apply disable rule' }}
-						</button>
-						<button
-							class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-							type="button"
-							:disabled="selectedModelDisableRule === null"
-							@click="clearSelectedModelDisableRule"
-						>
-							Clear selection
-						</button>
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<p :class="['text-[0.72rem] font-bold uppercase tracking-[0.16em]', rule.disabled ? 'text-danger' : 'text-accent']">
+										{{ rule.disabled ? 'Disable' : 'Re-enable' }}
+									</p>
+									<p class="mt-1 break-words font-mono text-[0.82rem] font-bold text-ink-strong">{{ rule.providerName }} · {{ rule.modelId }}</p>
+								</div>
+								<button
+									class="border-0 bg-transparent p-0 text-sm font-bold text-ink-soft transition duration-150 ease-out hover:text-ink-strong"
+									type="button"
+									@click="removePendingModelDisableRule(rule)"
+								>
+									Remove
+								</button>
+							</div>
+						</div>
+
+						<div class="grid gap-2.5">
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+								type="button"
+								:disabled="applyingModelDisableRule"
+								@click="applyModelDisableRule"
+							>
+								{{ applyingModelDisableRule ? 'Applying…' : `Apply ${pendingModelDisableRuleCount} change${pendingModelDisableRuleCount === 1 ? '' : 's'}` }}
+							</button>
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+								type="button"
+								:disabled="applyingModelDisableRule"
+								@click="clearPendingModelDisableRules"
+							>
+								Clear all
+							</button>
+						</div>
 					</div>
 				</article>
 
@@ -1326,24 +1388,24 @@ onMounted(() => {
 							data-anchor="model-disable-rule-chip"
 							:class="[
 								'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
-								selectedModelDisableRule?.providerId === rule.providerId && selectedModelDisableRule?.modelId === rule.modelId
-									? 'border-[rgba(24,34,47,0.24)] bg-[rgba(24,34,47,0.12)] text-ink-strong shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+								pendingModelDisableRuleFor(rule.providerId, rule.modelId) !== null
+									? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 									: 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger',
 							]"
 							type="button"
-							@click="selectModelDisableRule({ id: rule.providerId, name: rule.providerName }, rule.modelId)"
+							@click="toggleModelDisableRule({ id: rule.providerId, name: rule.providerName }, rule.modelId)"
 						>
 							{{ rule.providerName }} · {{ rule.modelId }}
 						</button>
 					</div>
 				</article>
 			</div>
-		</section>
+					</section>
 
-		<section
-			data-anchor="model-aliases"
-			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-		>
+					<section
+						data-anchor="model-aliases"
+						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+					>
 			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 				<div>
 					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model aliases</p>
@@ -1451,12 +1513,12 @@ onMounted(() => {
 					</div>
 				</article>
 			</div>
-		</section>
+					</section>
 
-		<section
-			data-anchor="providers"
-			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-		>
+					<section
+						data-anchor="providers"
+						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+					>
 			<div class="mb-5 flex items-start justify-between gap-3">
 				<div>
 					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Providers</p>
@@ -1478,19 +1540,19 @@ onMounted(() => {
 					:key="provider.id"
 					:provider="provider"
 					:syncing="syncingProviderId === provider.id"
-					:selected-rule="selectedModelDisableRule"
+					:pending-rules="pendingModelDisableRules"
 					@edit="beginEdit(provider)"
 					@sync="syncProvider(provider)"
-					@select-rule="selectModelDisableRule(provider, $event)"
+					@select-rule="toggleModelDisableRule(provider, $event)"
 					@delete="removeProvider(provider)"
 				/>
 			</div>
-		</section>
+					</section>
 
-		<section
-			data-anchor="models"
-			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-		>
+					<section
+						data-anchor="models"
+						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+					>
 			<div class="mb-5 flex items-start justify-between gap-3">
 				<div>
 					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model catalog</p>
@@ -1511,16 +1573,16 @@ onMounted(() => {
 					v-for="model in models"
 					:key="model.id"
 					:model="model"
-					:selected-rule="selectedModelDisableRule"
-					@select-rule="selectModelDisableRule($event, model.id)"
+					:pending-rules="pendingModelDisableRules"
+					@select-rule="toggleModelDisableRule($event, model.id)"
 				/>
 			</div>
-		</section>
+					</section>
 
-		<section
-			data-anchor="request-logs"
-			class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-		>
+					<section
+						data-anchor="request-logs"
+						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+					>
 			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 				<div>
 					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Request audit</p>
@@ -1599,7 +1661,17 @@ onMounted(() => {
 			<div v-else class="grid gap-[18px]">
 				<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
 			</div>
-		</section>
+					</section>
+				</div>
+
+				<PendingModelDisableRulesPanel
+					:rules="pendingModelDisableRules"
+					:applying="applyingModelDisableRule"
+					@remove-rule="removePendingModelDisableRule"
+					@clear="clearPendingModelDisableRules"
+					@apply="applyModelDisableRule"
+				/>
+			</div>
 		</template>
 	</div>
 </template>

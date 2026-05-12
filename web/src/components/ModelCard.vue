@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { ModelDisableRuleSelection, ModelRoute, ModelProviderSummary } from '../types'
+import type { ModelRoute, ModelProviderSummary, PendingModelDisableRule } from '../types'
 
 const props = defineProps<{
 	model: ModelRoute
-	selectedRule: ModelDisableRuleSelection | null
+	pendingRules: PendingModelDisableRule[]
 }>()
 
 const emit = defineEmits<{
@@ -11,7 +11,11 @@ const emit = defineEmits<{
 }>()
 
 function isSelected(providerId: number) {
-	return props.selectedRule?.providerId === providerId && props.selectedRule.modelId === props.model.id
+	return props.pendingRules.some((rule) => rule.providerId === providerId && rule.modelId === props.model.id)
+}
+
+function pendingRule(providerId: number) {
+	return props.pendingRules.find((rule) => rule.providerId === providerId && rule.modelId === props.model.id) ?? null
 }
 </script>
 
@@ -25,8 +29,10 @@ function isSelected(providerId: number) {
 				data-anchor="model-card-provider"
 				:class="[
 					'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
-					isSelected(provider.id)
-						? 'border-[rgba(24,34,47,0.24)] bg-[rgba(24,34,47,0.12)] text-ink-strong shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+					pendingRule(provider.id)?.disabled
+						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+						: isSelected(provider.id)
+							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: 'border-[rgba(200,93,53,0.14)] bg-[rgba(200,93,53,0.08)] text-accent-strong',
 				]"
 				type="button"

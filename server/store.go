@@ -120,6 +120,17 @@ type modelAliasMutation struct {
 	TargetProviderID *int64
 }
 
+// modelDisableRuleMutation captures one desired final provider/model disable
+// state after the admin API request completes.
+type modelDisableRuleMutation struct {
+	// ProviderID identifies the provider affected by the rule.
+	ProviderID int64
+	// ModelID identifies the synced model affected by the rule.
+	ModelID string
+	// Disabled reports whether the rule should exist after the request completes.
+	Disabled bool
+}
+
 // modelAliasView is the JSON payload returned to the Web UI for configured
 // model aliases.
 type modelAliasView struct {
@@ -805,12 +816,50 @@ func (s *store) deleteProvider(ctx context.Context, id int64) error {
 
 // setProviderModelDisabled creates or removes one provider/model disable rule.
 func (s *store) setProviderModelDisabled(ctx context.Context, providerID int64, modelID string, disabled bool) error {
-	if _, err := s.getProvider(ctx, providerID); err != nil {
-		return err
+	return s.setProviderModelDisabledBatch(ctx, []modelDisableRuleMutation{
+		{
+			ProviderID: providerID,
+			ModelID:    modelID,
+			Disabled:   disabled,
+		},
+	})
+}
+
+// setProviderModelDisabledBatch creates or removes multiple provider/model
+// disable rules in one transaction so the UI can apply a staged set atomically.
+func (s *store) setProviderModelDisabledBatch(ctx context.Context, mutations []modelDisableRuleMutation) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin model disable rule transaction: %w", err)
 	}
 
-	if disabled {
-		servesModel, err := s.providerServesModel(ctx, providerID, modelID)
+	for _, mutation := range mutations {
+		if err := s.setProviderModelDisabledTx(ctx, tx, mutation); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit model disable rule transaction: %w", err)
+	}
+
+	return nil
+}
+
+// setProviderModelDisabledTx validates one provider/model pair and applies the
+// requested disable-rule state using the supplied transaction.
+func (s *store) setProviderModelDisabledTx(ctx context.Context, tx *sql.Tx, mutation modelDisableRuleMutation) error {
+	exists, err := s.providerExistsTx(ctx, tx, mutation.ProviderID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errProviderNotFound
+	}
+
+	if mutation.Disabled {
+		servesModel, err := s.providerServesModelTx(ctx, tx, mutation.ProviderID, mutation.ModelID)
 		if err != nil {
 			return err
 		}
@@ -818,25 +867,57 @@ func (s *store) setProviderModelDisabled(ctx context.Context, providerID int64, 
 			return errProviderModelNotFound
 		}
 
-		if _, err := s.db.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO provider_model_disable_rules (provider_id, model_id, created_at)
 			VALUES (?, ?, ?)
 			ON CONFLICT(provider_id, model_id) DO NOTHING
-		`, providerID, modelID, nowRFC3339()); err != nil {
+		`, mutation.ProviderID, mutation.ModelID, nowRFC3339()); err != nil {
 			return fmt.Errorf("insert provider model disable rule: %w", err)
 		}
 
 		return nil
 	}
 
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM provider_model_disable_rules
 		WHERE provider_id = ? AND model_id = ?
-	`, providerID, modelID); err != nil {
+	`, mutation.ProviderID, mutation.ModelID); err != nil {
 		return fmt.Errorf("delete provider model disable rule: %w", err)
 	}
 
 	return nil
+}
+
+// providerExistsTx reports whether the referenced provider row exists inside
+// the supplied transaction scope.
+func (s *store) providerExistsTx(ctx context.Context, tx *sql.Tx, providerID int64) (bool, error) {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM providers WHERE id = ?`, providerID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("query provider: %w", err)
+	}
+
+	return true, nil
+}
+
+// providerServesModelTx reports whether the referenced provider currently has
+// a synced mapping for the requested model inside the supplied transaction.
+func (s *store) providerServesModelTx(ctx context.Context, tx *sql.Tx, providerID int64, modelID string) (bool, error) {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT 1
+		FROM provider_models
+		WHERE provider_id = ? AND model_id = ?
+	`, providerID, modelID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("query provider model mapping: %w", err)
+	}
+
+	return true, nil
 }
 
 // createProxyRequestLog inserts a new request audit record and returns its row ID.

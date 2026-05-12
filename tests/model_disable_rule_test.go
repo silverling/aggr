@@ -62,7 +62,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-disable-rules",
-		`{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}`,
+		`{"rules":[{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}]}`,
 		http.StatusOK,
 		nil,
 	)
@@ -113,7 +113,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-disable-rules",
-		`{"providerId":`+formatInt64(secondaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}`,
+		`{"rules":[{"providerId":`+formatInt64(secondaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}]}`,
 		http.StatusOK,
 		nil,
 	)
@@ -137,7 +137,7 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 		client,
 		http.MethodPut,
 		gatewayURL+"/api/model-disable-rules",
-		`{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":false}`,
+		`{"rules":[{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":false}]}`,
 		http.StatusOK,
 		nil,
 	)
@@ -166,6 +166,64 @@ func TestModelDisableRulesFilterRouting(t *testing.T) {
 	)
 	if routedPayload["provider"] != "Primary" {
 		t.Fatalf("routed provider after rule removal = %v, want Primary", routedPayload["provider"])
+	}
+}
+
+// TestModelDisableRulesBatchApply verifies that one batch request can apply
+// multiple disable-rule mutations, including a mix of disable and re-enable
+// operations.
+func TestModelDisableRulesBatchApply(t *testing.T) {
+	t.Parallel()
+
+	primaryUpstream := newModelDisableRuleUpstreamServer(t, "Primary")
+	defer primaryUpstream.Close()
+
+	secondaryUpstream := newModelDisableRuleUpstreamServer(t, "Secondary")
+	defer secondaryUpstream.Close()
+
+	gatewayURL, client := newTestGatewayServer(t)
+	primaryProvider := createNamedTestProvider(t, client, gatewayURL, "Primary", primaryUpstream.URL+"/v1", "PrimaryAgent/1.0")
+	secondaryProvider := createNamedTestProvider(t, client, gatewayURL, "Secondary", secondaryUpstream.URL+"/v1", "SecondaryAgent/1.0")
+
+	doJSONRequest(
+		t,
+		client,
+		http.MethodPut,
+		gatewayURL+"/api/model-disable-rules",
+		`{"rules":[{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}]}`,
+		http.StatusOK,
+		nil,
+	)
+
+	doJSONRequest(
+		t,
+		client,
+		http.MethodPut,
+		gatewayURL+"/api/model-disable-rules",
+		`{"rules":[`+
+			`{"providerId":`+formatInt64(primaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":false},`+
+			`{"providerId":`+formatInt64(secondaryProvider.ID)+`,"modelId":"gpt-4.1","disabled":true}`+
+			`]}`,
+		http.StatusOK,
+		nil,
+	)
+
+	var providersPayload testProvidersResponse
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/providers", "", http.StatusOK, &providersPayload)
+	if len(providersPayload.Providers) != 2 {
+		t.Fatalf("provider count = %d, want 2", len(providersPayload.Providers))
+	}
+
+	providerIndex := make(map[string]testProviderView, len(providersPayload.Providers))
+	for _, provider := range providersPayload.Providers {
+		providerIndex[provider.Name] = provider
+	}
+
+	if containsString(providerIndex["Primary"].DisabledModels, "gpt-4.1") {
+		t.Fatalf("primary disabled models after batch = %v, want no gpt-4.1 rule", providerIndex["Primary"].DisabledModels)
+	}
+	if !containsString(providerIndex["Secondary"].DisabledModels, "gpt-4.1") {
+		t.Fatalf("secondary disabled models after batch = %v, want gpt-4.1", providerIndex["Secondary"].DisabledModels)
 	}
 }
 

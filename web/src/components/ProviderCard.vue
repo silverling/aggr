@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { ModelDisableRuleSelection, ProviderView } from '../types'
+import type { PendingModelDisableRule, ProviderView } from '../types'
 
 const props = defineProps<{
 	provider: ProviderView
 	syncing: boolean
-	selectedRule: ModelDisableRuleSelection | null
+	pendingRules: PendingModelDisableRule[]
 }>()
 
 const emit = defineEmits<{
@@ -37,7 +37,11 @@ function isModelDisabled(modelId: string) {
 }
 
 function isSelected(modelId: string) {
-	return props.selectedRule?.providerId === props.provider.id && props.selectedRule.modelId === modelId
+	return props.pendingRules.some((rule) => rule.providerId === props.provider.id && rule.modelId === modelId)
+}
+
+function pendingRule(modelId: string) {
+	return props.pendingRules.find((rule) => rule.providerId === props.provider.id && rule.modelId === modelId) ?? null
 }
 </script>
 
@@ -77,8 +81,10 @@ function isSelected(modelId: string) {
 				data-anchor="provider-card-model"
 				:class="[
 					'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
-					isSelected(model)
-						? 'border-[rgba(24,34,47,0.24)] bg-[rgba(24,34,47,0.12)] text-ink-strong shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+					pendingRule(model)?.disabled
+						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+						: isSelected(model)
+							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: isModelDisabled(model)
 							? 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger'
 							: 'border-accent-soft bg-[rgba(12,118,98,0.08)] text-accent',

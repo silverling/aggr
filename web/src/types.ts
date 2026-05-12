@@ -71,10 +71,11 @@ export interface ModelAliasView {
 	updatedAt: string
 }
 
-export interface ModelDisableRuleSelection {
+export interface PendingModelDisableRule {
 	providerId: number
 	providerName: string
 	modelId: string
+	disabled: boolean
 }
 
 export interface ProvidersPayload {
@@ -171,8 +172,18 @@ export interface DeleteProxyRequestsPayload {
 	deleted: number
 }
 
-export interface SetModelDisableRulePayload {
+export interface SetModelDisableRuleItemPayload {
 	providerId: number
 	modelId: string
 	disabled: boolean
+}
+
+export interface SetModelDisableRulePayload {
+	rules: SetModelDisableRuleItemPayload[]
+}
+
+export interface SectionOutlineItem {
+	anchor: string
+	label: string
+	shortLabel: string
 }

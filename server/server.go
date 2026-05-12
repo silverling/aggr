@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -68,6 +69,13 @@ type modelDisableRulePayload struct {
 	ModelID string `json:"modelId"`
 	// Disabled reports whether the rule should exist after the request completes.
 	Disabled bool `json:"disabled"`
+}
+
+// modelDisableRulesPayload is the batch JSON body accepted by the provider/model
+// disable-rule API when the caller wants to apply multiple route changes at once.
+type modelDisableRulesPayload struct {
+	// Rules contains each provider/model pair together with its desired disabled state.
+	Rules []modelDisableRulePayload `json:"rules"`
 }
 
 // modelAliasPayload is the JSON body accepted by the model-alias create and
@@ -423,15 +431,16 @@ func (s *server) handleDeleteModelAlias(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSetModelDisableRule creates or removes one provider/model disable rule.
+// handleSetModelDisableRule creates or removes one or more provider/model
+// disable rules in a single request.
 func (s *server) handleSetModelDisableRule(w http.ResponseWriter, r *http.Request) {
-	payload, err := decodeModelDisableRulePayload(r)
+	mutations, err := decodeModelDisableRulesPayload(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := s.store.setProviderModelDisabled(r.Context(), payload.ProviderID, payload.ModelID, payload.Disabled); err != nil {
+	if err := s.store.setProviderModelDisabledBatch(r.Context(), mutations); err != nil {
 		switch {
 		case errors.Is(err, errProviderNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
@@ -443,7 +452,18 @@ func (s *server) handleSetModelDisableRule(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	writeJSON(w, http.StatusOK, payload)
+	response := modelDisableRulesPayload{
+		Rules: make([]modelDisableRulePayload, 0, len(mutations)),
+	}
+	for _, mutation := range mutations {
+		response.Rules = append(response.Rules, modelDisableRulePayload{
+			ProviderID: mutation.ProviderID,
+			ModelID:    mutation.ModelID,
+			Disabled:   mutation.Disabled,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 // handleGetRequestStats returns the selected summary metrics together with the
@@ -722,24 +742,75 @@ func decodeProviderPayload(r *http.Request, allowEmptyAPIKey bool) (providerMuta
 	return payload.validate(allowEmptyAPIKey)
 }
 
-// decodeModelDisableRulePayload parses and validates the provider/model
-// disable-rule request body.
-func decodeModelDisableRulePayload(r *http.Request) (modelDisableRulePayload, error) {
-	var payload modelDisableRulePayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		return modelDisableRulePayload{}, fmt.Errorf("decode model disable rule payload: %w", err)
+// decodeModelDisableRulesPayload parses and validates either the legacy
+// single-rule request body or the newer batch wrapper used by the dashboard.
+func decodeModelDisableRulesPayload(r *http.Request) ([]modelDisableRuleMutation, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read model disable rule payload: %w", err)
 	}
 
+	type batchEnvelope struct {
+		// Rules stores the raw JSON payload so the decoder can distinguish between
+		// an omitted field and an explicitly provided empty array.
+		Rules json.RawMessage `json:"rules"`
+	}
+
+	var envelope batchEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("decode model disable rule payload: %w", err)
+	}
+
+	if len(envelope.Rules) > 0 {
+		var payload modelDisableRulesPayload
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return nil, fmt.Errorf("decode model disable rules payload: %w", err)
+		}
+		if len(payload.Rules) == 0 {
+			return nil, errors.New("rules must contain at least one provider/model pair")
+		}
+
+		mutations := make([]modelDisableRuleMutation, 0, len(payload.Rules))
+		for index, rule := range payload.Rules {
+			mutation, err := normalizeModelDisableRulePayload(rule)
+			if err != nil {
+				return nil, fmt.Errorf("rules[%d]: %w", index, err)
+			}
+			mutations = append(mutations, mutation)
+		}
+		return mutations, nil
+	}
+
+	var payload modelDisableRulePayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode model disable rule payload: %w", err)
+	}
+
+	mutation, err := normalizeModelDisableRulePayload(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return []modelDisableRuleMutation{mutation}, nil
+}
+
+// normalizeModelDisableRulePayload trims and validates one provider/model
+// disable-rule payload before the store applies it.
+func normalizeModelDisableRulePayload(payload modelDisableRulePayload) (modelDisableRuleMutation, error) {
 	if payload.ProviderID <= 0 {
-		return modelDisableRulePayload{}, errors.New("providerId must be a positive integer")
+		return modelDisableRuleMutation{}, errors.New("providerId must be a positive integer")
 	}
 
 	payload.ModelID = strings.TrimSpace(payload.ModelID)
 	if payload.ModelID == "" {
-		return modelDisableRulePayload{}, errors.New("modelId is required")
+		return modelDisableRuleMutation{}, errors.New("modelId is required")
 	}
 
-	return payload, nil
+	return modelDisableRuleMutation{
+		ProviderID: payload.ProviderID,
+		ModelID:    payload.ModelID,
+		Disabled:   payload.Disabled,
+	}, nil
 }
 
 // decodeModelAliasPayload parses and validates the model-alias request body.
