@@ -1,4 +1,4 @@
-.PHONY: build go-build test web-dev web-build fmt tidy
+.PHONY: build go-build test dev web-dev web-build fmt tidy
 
 build: go-build
 
@@ -7,6 +7,11 @@ go-build: web-build
 
 test: web-build
 	go test ./...
+
+dev:
+	@trap 'kill 0' INT TERM EXIT; \
+	pnpm --dir web dev & \
+	AGGR_ENV=dev go run ./server/cmd/aggr
 
 web-dev:
 	pnpm --dir web dev
