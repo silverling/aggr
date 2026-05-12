@@ -2,15 +2,15 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import ApiKeyCard from './components/ApiKeyCard.vue'
-import ModelCard from './components/ModelCard.vue'
 import ModelAliasCard from './components/ModelAliasCard.vue'
+import ModelCard from './components/ModelCard.vue'
 import PendingModelDisableRulesPanel from './components/PendingModelDisableRulesPanel.vue'
-import StatsSection from './components/StatsSection.vue'
 import ProviderCard from './components/ProviderCard.vue'
 import RequestLogCard from './components/RequestLogCard.vue'
 import SectionOutline from './components/SectionOutline.vue'
-import StatCard from './components/StatCard.vue'
 import SessionCard from './components/SessionCard.vue'
+import StatCard from './components/StatCard.vue'
+import StatsSection from './components/StatsSection.vue'
 import type {
 	AuthSessionStateResponse,
 	AuthSessionView,
@@ -953,7 +953,10 @@ onMounted(() => {
 				<div class="rounded-[var(--radius-card)] border border-line bg-surface-strong p-4.5">
 					<p class="text-sm font-bold uppercase tracking-[0.14em] text-accent-strong">How it works</p>
 					<ul class="mt-4 grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
-						<li>The access key comes from <code class="font-mono text-ink-strong">AGGR_ACCESS_KEY</code> in the <code class="font-mono text-ink-strong">.env</code> file.</li>
+						<li>
+							The access key comes from <code class="font-mono text-ink-strong">AGGR_ACCESS_KEY</code> in the
+							<code class="font-mono text-ink-strong">.env</code> file.
+						</li>
 						<li>Browser sessions are stored in SQLite and shown below after login.</li>
 						<li>Bare `/v1` requests need a gateway API key created in this dashboard.</li>
 					</ul>
@@ -995,50 +998,50 @@ onMounted(() => {
 						data-anchor="hero"
 						class="grid gap-7 overflow-hidden rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-[34px]"
 					>
-			<div class="max-w-[760px]">
-				<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Unified gateway</p>
-				<h1>Aggr</h1>
-				<p class="mt-4 max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">
-					Store provider credentials in SQLite, discover their model catalogs, and proxy each request to the provider that actually serves the
-					requested model.
-				</p>
-				<p class="mt-3 text-sm text-ink-soft">
-					{{ authState?.session ? `Current session #${authState.session.id}` : 'Logged in and ready.' }}
-				</p>
-			</div>
+						<div class="max-w-[760px]">
+							<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Unified gateway</p>
+							<h1>Aggr</h1>
+							<p class="mt-4 max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">
+								Store provider credentials in SQLite, discover their model catalogs, and proxy each request to the provider that actually serves
+								the requested model.
+							</p>
+							<p class="mt-3 text-sm text-ink-soft">
+								{{ authState?.session ? `Current session #${authState.session.id}` : 'Logged in and ready.' }}
+							</p>
+						</div>
 
-			<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-				<button
-					class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-					type="button"
-					:disabled="loading"
-					@click="loadDashboard(true)"
-				>
-					{{ loading ? 'Refreshing…' : 'Refresh dashboard' }}
-				</button>
-				<button
-					class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-					type="button"
-					:disabled="syncingAll"
-					@click="syncAll"
-				>
-					{{ syncingAll ? 'Syncing catalogs…' : 'Sync all providers' }}
-				</button>
-				<button
-					class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-					type="button"
-					@click="logout"
-				>
-					Sign out
-				</button>
-			</div>
+						<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="button"
+								:disabled="loading"
+								@click="loadDashboard(true)"
+							>
+								{{ loading ? 'Refreshing…' : 'Refresh dashboard' }}
+							</button>
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="button"
+								:disabled="syncingAll"
+								@click="syncAll"
+							>
+								{{ syncingAll ? 'Syncing catalogs…' : 'Sync all providers' }}
+							</button>
+							<button
+								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+								type="button"
+								@click="logout"
+							>
+								Sign out
+							</button>
+						</div>
 
-			<div class="grid gap-[18px] md:grid-cols-2 xl:grid-cols-4">
-				<StatCard label="Providers" :value="providerCount" :description="`${enabledProviderCount} enabled for routing`" />
-				<StatCard label="Models" :value="modelCount" description="From synced `/v1/models` catalogs" />
-				<StatCard label="Aliases" :value="modelAliasCount" description="Public model names mapped to upstream targets" />
-				<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
-			</div>
+						<div class="grid gap-[18px] md:grid-cols-2 xl:grid-cols-4">
+							<StatCard label="Providers" :value="providerCount" :description="`${enabledProviderCount} enabled for routing`" />
+							<StatCard label="Models" :value="modelCount" description="From synced `/v1/models` catalogs" />
+							<StatCard label="Aliases" :value="modelAliasCount" description="Public model names mapped to upstream targets" />
+							<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
+						</div>
 					</header>
 
 					<StatsSection
@@ -1054,606 +1057,616 @@ onMounted(() => {
 						data-anchor="auth-management"
 						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 					>
-			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-				<div>
-					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Access control</p>
-					<h2>Browser sessions and API keys</h2>
-					<p class="mt-1.5 leading-[1.6] text-ink-soft">
-						Browser sessions unlock the admin UI; gateway API keys are required for `/v1` requests.
-					</p>
-				</div>
-				<span class="text-ink-soft">{{ sessionCount }} sessions / {{ apiKeyCount }} API keys</span>
-			</div>
-
-			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-				<article data-anchor="api-key-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-					<div>
-						<h3>Create gateway API keys</h3>
-						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							Use these bearer tokens when calling the gateway&apos;s OpenAI-like `/v1` endpoints.
-						</p>
-					</div>
-
-					<form class="grid gap-4" @submit.prevent="submitGatewayAPIKey">
-						<label class="grid gap-2">
-							<span class="text-[0.92rem] font-bold text-ink-strong">Key name</span>
-							<input
-								v-model.trim="apiKeyForm.name"
-								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-								type="text"
-								autocomplete="off"
-								placeholder="Production client"
-								required
-							/>
-						</label>
-
-						<button
-							class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-							type="submit"
-							:disabled="creatingApiKey"
-						>
-							{{ creatingApiKey ? 'Creating…' : 'Create API key' }}
-						</button>
-					</form>
-
-					<div
-						v-if="generatedApiKey"
-						data-anchor="api-key-reveal"
-						class="grid gap-3 rounded-[18px] border border-accent-soft bg-accent-soft p-4"
-					>
-						<div>
-							<p class="text-xs font-bold uppercase tracking-[0.1em] text-accent">Shown once</p>
-							<h3 class="mt-1">Copy this key now</h3>
+						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+							<div>
+								<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Access control</p>
+								<h2>Browser sessions and API keys</h2>
+								<p class="mt-1.5 leading-[1.6] text-ink-soft">
+									Browser sessions unlock the admin UI; gateway API keys are required for `/v1` requests.
+								</p>
+							</div>
+							<span class="text-ink-soft">{{ sessionCount }} sessions / {{ apiKeyCount }} API keys</span>
 						</div>
-						<code class="wrap-break-word rounded-[16px] border border-line bg-white/75 px-3.5 py-3 text-[0.84rem] text-ink">{{ generatedApiKey.apiKey }}</code>
-						<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="button"
-								@click="copyGeneratedAPIKey"
-							>
-								Copy key
-							</button>
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="button"
-								@click="resetGeneratedApiKey"
-							>
-								Dismiss
-							</button>
+
+						<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+							<article data-anchor="api-key-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+								<div>
+									<h3>Create gateway API keys</h3>
+									<p class="mt-1.5 leading-[1.6] text-ink-soft">
+										Use these bearer tokens when calling the gateway&apos;s OpenAI-like `/v1` endpoints.
+									</p>
+								</div>
+
+								<form class="grid gap-4" @submit.prevent="submitGatewayAPIKey">
+									<label class="grid gap-2">
+										<span class="text-[0.92rem] font-bold text-ink-strong">Key name</span>
+										<input
+											v-model.trim="apiKeyForm.name"
+											class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											type="text"
+											autocomplete="off"
+											placeholder="Production client"
+											required
+										/>
+									</label>
+
+									<button
+										class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+										type="submit"
+										:disabled="creatingApiKey"
+									>
+										{{ creatingApiKey ? 'Creating…' : 'Create API key' }}
+									</button>
+								</form>
+
+								<div
+									v-if="generatedApiKey"
+									data-anchor="api-key-reveal"
+									class="grid gap-3 rounded-[18px] border border-accent-soft bg-accent-soft p-4"
+								>
+									<div>
+										<p class="text-xs font-bold uppercase tracking-[0.1em] text-accent">Shown once</p>
+										<h3 class="mt-1">Copy this key now</h3>
+									</div>
+									<code class="wrap-break-word rounded-[16px] border border-line bg-white/75 px-3.5 py-3 text-[0.84rem] text-ink">{{
+										generatedApiKey.apiKey
+									}}</code>
+									<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
+										<button
+											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+											type="button"
+											@click="copyGeneratedAPIKey"
+										>
+											Copy key
+										</button>
+										<button
+											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+											type="button"
+											@click="resetGeneratedApiKey"
+										>
+											Dismiss
+										</button>
+									</div>
+								</div>
+
+								<p
+									v-if="apiKeys.length === 0"
+									class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+								>
+									No gateway API keys have been created yet.
+								</p>
+
+								<div v-else class="grid gap-3">
+									<ApiKeyCard
+										v-for="apiKey in apiKeys"
+										:key="apiKey.id"
+										:api-key="apiKey"
+										:deleting="deletingApiKeyId === apiKey.id"
+										@delete="revokeGatewayAPIKey(apiKey)"
+									/>
+								</div>
+							</article>
+
+							<article data-anchor="session-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+								<div>
+									<h3>Logged in sessions</h3>
+									<p class="mt-1.5 leading-[1.6] text-ink-soft">
+										Each login creates a database-backed cookie session. Revoke one here to force the browser to sign in again.
+									</p>
+								</div>
+
+								<p
+									v-if="sessions.length === 0"
+									class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+								>
+									No browser sessions are active yet.
+								</p>
+
+								<div v-else class="grid gap-3">
+									<SessionCard
+										v-for="session in sessions"
+										:key="session.id"
+										:session="session"
+										:deleting="deletingSessionId === session.id"
+										@delete="revokeSession(session)"
+									/>
+								</div>
+							</article>
 						</div>
-					</div>
-
-					<p
-						v-if="apiKeys.length === 0"
-						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
-					>
-						No gateway API keys have been created yet.
-					</p>
-
-					<div v-else class="grid gap-3">
-						<ApiKeyCard
-							v-for="apiKey in apiKeys"
-							:key="apiKey.id"
-							:api-key="apiKey"
-							:deleting="deletingApiKeyId === apiKey.id"
-							@delete="revokeGatewayAPIKey(apiKey)"
-						/>
-					</div>
-				</article>
-
-				<article data-anchor="session-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-					<div>
-						<h3>Logged in sessions</h3>
-						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							Each login creates a database-backed cookie session. Revoke one here to force the browser to sign in again.
-						</p>
-					</div>
-
-					<p
-						v-if="sessions.length === 0"
-						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
-					>
-						No browser sessions are active yet.
-					</p>
-
-					<div v-else class="grid gap-3">
-						<SessionCard
-							v-for="session in sessions"
-							:key="session.id"
-							:session="session"
-							:deleting="deletingSessionId === session.id"
-							@delete="revokeSession(session)"
-						/>
-					</div>
-				</article>
-			</div>
 					</section>
 
 					<section class="grid gap-[18px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-			<article
-				data-anchor="provider-config"
-				class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-			>
-				<div class="mb-5 flex items-start justify-between gap-3">
-					<div>
-						<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Provider config</p>
-						<h2>{{ isEditing ? 'Update an upstream provider' : 'Add an upstream provider' }}</h2>
-					</div>
-					<button v-if="isEditing" class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="resetForm">
-						Cancel edit
-					</button>
-				</div>
+						<article
+							data-anchor="provider-config"
+							class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+						>
+							<div class="mb-5 flex items-start justify-between gap-3">
+								<div>
+									<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Provider config</p>
+									<h2>{{ isEditing ? 'Update an upstream provider' : 'Add an upstream provider' }}</h2>
+								</div>
+								<button v-if="isEditing" class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="resetForm">
+									Cancel edit
+								</button>
+							</div>
 
-				<form class="grid gap-4" @submit.prevent="submitProvider">
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">Display name</span>
-						<input
-							v-model.trim="form.name"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							type="text"
-							autocomplete="off"
-							placeholder="OpenAI primary"
-							required
-						/>
-					</label>
+							<form class="grid gap-4" @submit.prevent="submitProvider">
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">Display name</span>
+									<input
+										v-model.trim="form.name"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										type="text"
+										autocomplete="off"
+										placeholder="OpenAI primary"
+										required
+									/>
+								</label>
 
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">Base URL</span>
-						<input
-							v-model.trim="form.baseUrl"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							type="url"
-							autocomplete="off"
-							placeholder="https://api.openai.com/v1"
-							required
-						/>
-						<small class="text-ink-soft">Use the provider&apos;s OpenAI-compatible API root.</small>
-					</label>
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">Base URL</span>
+									<input
+										v-model.trim="form.baseUrl"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										type="url"
+										autocomplete="off"
+										placeholder="https://api.openai.com/v1"
+										required
+									/>
+									<small class="text-ink-soft">Use the provider&apos;s OpenAI-compatible API root.</small>
+								</label>
 
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">API key</span>
-						<input
-							v-model.trim="form.apiKey"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							type="password"
-							:placeholder="isEditing ? 'Leave blank to keep the current key' : 'sk-...'"
-							:required="!isEditing"
-						/>
-					</label>
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">API key</span>
+									<input
+										v-model.trim="form.apiKey"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										type="password"
+										:placeholder="isEditing ? 'Leave blank to keep the current key' : 'sk-...'"
+										:required="!isEditing"
+									/>
+								</label>
 
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">User agent</span>
-						<input
-							v-model.trim="form.userAgent"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							type="text"
-							autocomplete="off"
-							placeholder="Aggr/1.0"
-						/>
-						<small class="text-ink-soft">Leave blank to use the SDK default upstream user agent.</small>
-					</label>
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">User agent</span>
+									<input
+										v-model.trim="form.userAgent"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										type="text"
+										autocomplete="off"
+										placeholder="Aggr/1.0"
+									/>
+									<small class="text-ink-soft">Leave blank to use the SDK default upstream user agent.</small>
+								</label>
 
-					<label class="flex items-center justify-start gap-3 rounded-[var(--radius-field)] border border-line bg-surface-muted px-4 py-[14px]">
-						<input v-model="form.enabled" class="h-[18px] w-[18px] accent-accent" type="checkbox" />
-						<span class="font-bold text-ink-strong">Enabled for model routing</span>
-					</label>
+								<label
+									class="flex items-center justify-start gap-3 rounded-[var(--radius-field)] border border-line bg-surface-muted px-4 py-[14px]"
+								>
+									<input v-model="form.enabled" class="h-[18px] w-[18px] accent-accent" type="checkbox" />
+									<span class="font-bold text-ink-strong">Enabled for model routing</span>
+								</label>
 
-					<button
-						class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-						type="submit"
-						:disabled="saving"
-					>
-						{{ saving ? 'Saving…' : isEditing ? 'Update provider' : 'Create provider' }}
-					</button>
-				</form>
-			</article>
+								<button
+									class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+									type="submit"
+									:disabled="saving"
+								>
+									{{ saving ? 'Saving…' : isEditing ? 'Update provider' : 'Create provider' }}
+								</button>
+							</form>
+						</article>
 
-			<article
-				data-anchor="quick-start"
-				class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-			>
-				<div class="mb-5 flex items-start justify-between gap-3">
-					<div>
-						<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Quick start</p>
-						<h2>Point clients at the gateway</h2>
-					</div>
-					<button class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="copyGatewayBase">Copy base URL</button>
-				</div>
+						<article
+							data-anchor="quick-start"
+							class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
+						>
+							<div class="mb-5 flex items-start justify-between gap-3">
+								<div>
+									<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Quick start</p>
+									<h2>Point clients at the gateway</h2>
+								</div>
+								<button class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="copyGatewayBase">Copy base URL</button>
+							</div>
 
-				<div
-					class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] border border-line bg-surface-strong p-[18px]"
-				>
-					<span class="text-[0.82rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Gateway base</span>
-					<code class="break-words text-ink-strong">{{ gatewayBase }}</code>
-				</div>
+							<div
+								class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] border border-line bg-surface-strong p-[18px]"
+							>
+								<span class="text-[0.82rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Gateway base</span>
+								<code class="break-words text-ink-strong">{{ gatewayBase }}</code>
+							</div>
 
-				<pre
-					class="m-0 overflow-auto rounded-[var(--radius-card)] border border-line bg-[linear-gradient(180deg,rgba(14,32,41,0.96),rgba(14,32,41,0.88)),radial-gradient(circle_at_top_left,rgba(12,118,98,0.28),transparent_55%)] p-[18px] text-[#dff7f1]"
-				><code class="whitespace-pre-wrap break-words text-[0.92rem] leading-[1.75]">{{ curlExample }}</code></pre>
+							<pre
+								class="m-0 overflow-auto rounded-[var(--radius-card)] border border-line bg-[linear-gradient(180deg,rgba(14,32,41,0.96),rgba(14,32,41,0.88)),radial-gradient(circle_at_top_left,rgba(12,118,98,0.28),transparent_55%)] p-[18px] text-[#dff7f1]"
+							><code class="whitespace-pre-wrap break-words text-[0.92rem] leading-[1.75]">{{ curlExample }}</code></pre>
 
-				<ul class="mt-4 grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
-					<li><code class="font-mono text-ink-strong">GET /v1/models</code> returns the aggregated model catalog.</li>
-					<li>Requests are routed strictly by the <code class="font-mono text-ink-strong">model</code> field in the JSON payload.</li>
-					<li>Providers sync automatically after create or update, and you can resync at any time.</li>
-				</ul>
-			</article>
+							<ul class="mt-4 grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
+								<li><code class="font-mono text-ink-strong">GET /v1/models</code> returns the aggregated model catalog.</li>
+								<li>Requests are routed strictly by the <code class="font-mono text-ink-strong">model</code> field in the JSON payload.</li>
+								<li>Providers sync automatically after create or update, and you can resync at any time.</li>
+							</ul>
+						</article>
 					</section>
 
 					<section
 						data-anchor="model-disable-rules"
 						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 					>
-			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-				<div>
-					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model disable rules</p>
-					<h2>Stage provider/model route changes</h2>
-				</div>
-				<span class="text-ink-soft">{{ pendingModelDisableRuleCount }} staged / {{ activeModelDisableRules.length }} active</span>
-			</div>
-
-			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
-				<article data-anchor="model-disable-rule-guide" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-					<div>
-						<h3>How to use it</h3>
-						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							Click a provider chip in a model card or a model chip in a provider card to stage the inverse of its current route state.
-							Apply staged changes together from the floating pending card.
-						</p>
-					</div>
-
-					<ul class="grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
-						<li>Red queued chips will create disable rules.</li>
-						<li>Green queued chips will remove existing disable rules.</li>
-						<li>Click the same chip again to unstage it before applying.</li>
-					</ul>
-
-					<div
-						v-if="pendingModelDisableRuleCount === 0"
-						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft min-[1848px]:hidden"
-					>
-						No pending route changes are staged yet.
-					</div>
-
-					<div v-else class="grid gap-3 min-[1848px]:hidden">
-						<div
-							v-for="rule in pendingModelDisableRules"
-							:key="`${rule.providerId}:${rule.modelId}`"
-							class="rounded-[18px] border border-line bg-white/80 p-3"
-						>
-							<div class="flex items-start justify-between gap-3">
-								<div class="min-w-0">
-									<p :class="['text-[0.72rem] font-bold uppercase tracking-[0.16em]', rule.disabled ? 'text-danger' : 'text-accent']">
-										{{ rule.disabled ? 'Disable' : 'Re-enable' }}
-									</p>
-									<p class="mt-1 break-words font-mono text-[0.82rem] font-bold text-ink-strong">{{ rule.providerName }} · {{ rule.modelId }}</p>
-								</div>
-								<button
-									class="border-0 bg-transparent p-0 text-sm font-bold text-ink-soft transition duration-150 ease-out hover:text-ink-strong"
-									type="button"
-									@click="removePendingModelDisableRule(rule)"
-								>
-									Remove
-								</button>
+						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+							<div>
+								<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model disable rules</p>
+								<h2>Stage provider/model route changes</h2>
 							</div>
+							<span class="text-ink-soft">{{ pendingModelDisableRuleCount }} staged / {{ activeModelDisableRules.length }} active</span>
 						</div>
 
-						<div class="grid gap-2.5">
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-								type="button"
-								:disabled="applyingModelDisableRule"
-								@click="applyModelDisableRule"
-							>
-								{{ applyingModelDisableRule ? 'Applying…' : `Apply ${pendingModelDisableRuleCount} change${pendingModelDisableRuleCount === 1 ? '' : 's'}` }}
-							</button>
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-								type="button"
-								:disabled="applyingModelDisableRule"
-								@click="clearPendingModelDisableRules"
-							>
-								Clear all
-							</button>
+						<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+							<article data-anchor="model-disable-rule-guide" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+								<div>
+									<h3>How to use it</h3>
+									<p class="mt-1.5 leading-[1.6] text-ink-soft">
+										Click a provider chip in a model card or a model chip in a provider card to stage the inverse of its current route state.
+										Apply staged changes together from the floating pending card.
+									</p>
+								</div>
+
+								<ul class="grid gap-2.5 pl-4 leading-[1.55] text-ink-soft">
+									<li>Red queued chips will create disable rules.</li>
+									<li>Green queued chips will remove existing disable rules.</li>
+									<li>Click the same chip again to unstage it before applying.</li>
+								</ul>
+
+								<div
+									v-if="pendingModelDisableRuleCount === 0"
+									class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft min-[1848px]:hidden"
+								>
+									No pending route changes are staged yet.
+								</div>
+
+								<div v-else class="grid gap-3 min-[1848px]:hidden">
+									<div
+										v-for="rule in pendingModelDisableRules"
+										:key="`${rule.providerId}:${rule.modelId}`"
+										class="rounded-[18px] border border-line bg-white/80 p-3"
+									>
+										<div class="flex items-start justify-between gap-3">
+											<div class="min-w-0">
+												<p :class="['text-[0.72rem] font-bold uppercase tracking-[0.16em]', rule.disabled ? 'text-danger' : 'text-accent']">
+													{{ rule.disabled ? 'Disable' : 'Re-enable' }}
+												</p>
+												<p class="mt-1 break-words font-mono text-[0.82rem] font-bold text-ink-strong">
+													{{ rule.providerName }} · {{ rule.modelId }}
+												</p>
+											</div>
+											<button
+												class="border-0 bg-transparent p-0 text-sm font-bold text-ink-soft transition duration-150 ease-out hover:text-ink-strong"
+												type="button"
+												@click="removePendingModelDisableRule(rule)"
+											>
+												Remove
+											</button>
+										</div>
+									</div>
+
+									<div class="grid gap-2.5">
+										<button
+											class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+											type="button"
+											:disabled="applyingModelDisableRule"
+											@click="applyModelDisableRule"
+										>
+											{{
+												applyingModelDisableRule
+													? 'Applying…'
+													: `Apply ${pendingModelDisableRuleCount} change${pendingModelDisableRuleCount === 1 ? '' : 's'}`
+											}}
+										</button>
+										<button
+											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+											type="button"
+											:disabled="applyingModelDisableRule"
+											@click="clearPendingModelDisableRules"
+										>
+											Clear all
+										</button>
+									</div>
+								</div>
+							</article>
+
+							<article data-anchor="model-disable-rule-active" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+								<div>
+									<h3>Current rules</h3>
+									<p class="mt-1.5 leading-[1.6] text-ink-soft">
+										Disabled routes stay out of `/v1/models` and proxy selection until you remove the rule.
+									</p>
+								</div>
+
+								<p
+									v-if="activeModelDisableRules.length === 0"
+									class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+								>
+									No provider/model pairs are disabled right now.
+								</p>
+
+								<div v-else class="flex flex-wrap gap-2.5">
+									<button
+										v-for="rule in activeModelDisableRules"
+										:key="`${rule.providerId}:${rule.modelId}`"
+										data-anchor="model-disable-rule-chip"
+										:class="[
+											'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
+											pendingModelDisableRuleFor(rule.providerId, rule.modelId) !== null
+												? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+												: 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger',
+										]"
+										type="button"
+										@click="toggleModelDisableRule({ id: rule.providerId, name: rule.providerName }, rule.modelId)"
+									>
+										{{ rule.providerName }} · {{ rule.modelId }}
+									</button>
+								</div>
+							</article>
 						</div>
-					</div>
-				</article>
-
-				<article data-anchor="model-disable-rule-active" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-					<div>
-						<h3>Current rules</h3>
-						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							Disabled routes stay out of `/v1/models` and proxy selection until you remove the rule.
-						</p>
-					</div>
-
-					<p
-						v-if="activeModelDisableRules.length === 0"
-						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
-					>
-						No provider/model pairs are disabled right now.
-					</p>
-
-					<div v-else class="flex flex-wrap gap-2.5">
-						<button
-							v-for="rule in activeModelDisableRules"
-							:key="`${rule.providerId}:${rule.modelId}`"
-							data-anchor="model-disable-rule-chip"
-							:class="[
-								'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
-								pendingModelDisableRuleFor(rule.providerId, rule.modelId) !== null
-									? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
-									: 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger',
-							]"
-							type="button"
-							@click="toggleModelDisableRule({ id: rule.providerId, name: rule.providerName }, rule.modelId)"
-						>
-							{{ rule.providerName }} · {{ rule.modelId }}
-						</button>
-					</div>
-				</article>
-			</div>
 					</section>
 
 					<section
 						data-anchor="model-aliases"
 						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 					>
-			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-				<div>
-					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model aliases</p>
-					<h2>Create public model names</h2>
-				</div>
-				<span class="text-ink-soft">{{ modelAliasCount }} alias{{ modelAliasCount === 1 ? '' : 'es' }}</span>
-			</div>
-
-			<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-				<article data-anchor="model-alias-form" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-					<div>
-						<h3>{{ isEditingModelAlias ? 'Update alias' : 'Add alias' }}</h3>
-						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							Create a new public model name and point it at a model, optionally locking it to one provider.
-						</p>
-					</div>
-
-					<form class="grid gap-4" @submit.prevent="submitModelAlias">
-						<label class="grid gap-2">
-							<span class="text-[0.92rem] font-bold text-ink-strong">Alias model name</span>
-							<input
-								v-model.trim="modelAliasForm.aliasModelId"
-								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-								type="text"
-								autocomplete="off"
-								placeholder="team-gateway"
-								required
-							/>
-						</label>
-
-						<label class="grid gap-2">
-							<span class="text-[0.92rem] font-bold text-ink-strong">Target model</span>
-							<input
-								v-model.trim="modelAliasForm.targetModelId"
-								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-								list="model-alias-target-models"
-								type="text"
-								autocomplete="off"
-								placeholder="gpt-4.1"
-								required
-							/>
-							<datalist id="model-alias-target-models">
-								<option v-for="modelId in targetModelOptions" :key="modelId" :value="modelId" />
-							</datalist>
-						</label>
-
-						<label class="grid gap-2">
-							<span class="text-[0.92rem] font-bold text-ink-strong">Target provider (optional)</span>
-							<select
-								v-model="modelAliasForm.targetProviderId"
-								class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							>
-								<option value="">Any enabled provider</option>
-								<option v-for="provider in aliasTargetProviderOptions" :key="provider.id" :value="String(provider.id)">
-									{{ provider.name }}{{ provider.enabled ? '' : ' (disabled)' }}
-								</option>
-							</select>
-							<small class="text-ink-soft">Leave blank to route through any enabled provider that serves the target model.</small>
-						</label>
-
-						<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="submit"
-								:disabled="aliasSaving"
-							>
-								{{ aliasSaving ? 'Saving…' : isEditingModelAlias ? 'Update alias' : 'Create alias' }}
-							</button>
-							<button
-								v-if="isEditingModelAlias"
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="button"
-								@click="resetModelAliasForm"
-							>
-								Cancel edit
-							</button>
+						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+							<div>
+								<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model aliases</p>
+								<h2>Create public model names</h2>
+							</div>
+							<span class="text-ink-soft">{{ modelAliasCount }} alias{{ modelAliasCount === 1 ? '' : 'es' }}</span>
 						</div>
-					</form>
-				</article>
 
-				<article data-anchor="model-alias-list" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-					<div>
-						<h3>Configured aliases</h3>
-						<p class="mt-1.5 leading-[1.6] text-ink-soft">
-							These aliases are exposed by `/v1/models` and are available to clients as if they were native model names.
-						</p>
-					</div>
+						<div class="grid gap-[18px] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+							<article data-anchor="model-alias-form" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+								<div>
+									<h3>{{ isEditingModelAlias ? 'Update alias' : 'Add alias' }}</h3>
+									<p class="mt-1.5 leading-[1.6] text-ink-soft">
+										Create a new public model name and point it at a model, optionally locking it to one provider.
+									</p>
+								</div>
 
-					<p
-						v-if="modelAliases.length === 0"
-						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
-					>
-						No aliases have been configured yet.
-					</p>
+								<form class="grid gap-4" @submit.prevent="submitModelAlias">
+									<label class="grid gap-2">
+										<span class="text-[0.92rem] font-bold text-ink-strong">Alias model name</span>
+										<input
+											v-model.trim="modelAliasForm.aliasModelId"
+											class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											type="text"
+											autocomplete="off"
+											placeholder="team-gateway"
+											required
+										/>
+									</label>
 
-					<div v-else class="grid gap-3">
-						<ModelAliasCard
-							v-for="alias in modelAliases"
-							:key="alias.id"
-							:alias="alias"
-							:editing="editingModelAliasId === alias.id"
-							@edit="beginEditModelAlias(alias)"
-							@delete="removeModelAlias(alias)"
-						/>
-					</div>
-				</article>
-			</div>
+									<label class="grid gap-2">
+										<span class="text-[0.92rem] font-bold text-ink-strong">Target model</span>
+										<input
+											v-model.trim="modelAliasForm.targetModelId"
+											class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											list="model-alias-target-models"
+											type="text"
+											autocomplete="off"
+											placeholder="gpt-4.1"
+											required
+										/>
+										<datalist id="model-alias-target-models">
+											<option v-for="modelId in targetModelOptions" :key="modelId" :value="modelId" />
+										</datalist>
+									</label>
+
+									<label class="grid gap-2">
+										<span class="text-[0.92rem] font-bold text-ink-strong">Target provider (optional)</span>
+										<select
+											v-model="modelAliasForm.targetProviderId"
+											class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										>
+											<option value="">Any enabled provider</option>
+											<option v-for="provider in aliasTargetProviderOptions" :key="provider.id" :value="String(provider.id)">
+												{{ provider.name }}{{ provider.enabled ? '' : ' (disabled)' }}
+											</option>
+										</select>
+										<small class="text-ink-soft">Leave blank to route through any enabled provider that serves the target model.</small>
+									</label>
+
+									<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+										<button
+											class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-[18px] font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+											type="submit"
+											:disabled="aliasSaving"
+										>
+											{{ aliasSaving ? 'Saving…' : isEditingModelAlias ? 'Update alias' : 'Create alias' }}
+										</button>
+										<button
+											v-if="isEditingModelAlias"
+											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+											type="button"
+											@click="resetModelAliasForm"
+										>
+											Cancel edit
+										</button>
+									</div>
+								</form>
+							</article>
+
+							<article data-anchor="model-alias-list" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+								<div>
+									<h3>Configured aliases</h3>
+									<p class="mt-1.5 leading-[1.6] text-ink-soft">
+										These aliases are exposed by `/v1/models` and are available to clients as if they were native model names.
+									</p>
+								</div>
+
+								<p
+									v-if="modelAliases.length === 0"
+									class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft"
+								>
+									No aliases have been configured yet.
+								</p>
+
+								<div v-else class="grid gap-3">
+									<ModelAliasCard
+										v-for="alias in modelAliases"
+										:key="alias.id"
+										:alias="alias"
+										:editing="editingModelAliasId === alias.id"
+										@edit="beginEditModelAlias(alias)"
+										@delete="removeModelAlias(alias)"
+									/>
+								</div>
+							</article>
+						</div>
 					</section>
 
 					<section
 						data-anchor="providers"
 						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 					>
-			<div class="mb-5 flex items-start justify-between gap-3">
-				<div>
-					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Providers</p>
-					<h2>Routing inventory</h2>
-				</div>
-				<span class="text-ink-soft">{{ enabledProviderCount }} active / {{ providerCount }} total</span>
-			</div>
+						<div class="mb-5 flex items-start justify-between gap-3">
+							<div>
+								<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Providers</p>
+								<h2>Routing inventory</h2>
+							</div>
+							<span class="text-ink-soft">{{ enabledProviderCount }} active / {{ providerCount }} total</span>
+						</div>
 
-			<div
-				v-if="providers.length === 0"
-				class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
-			>
-				Add a provider above to start discovering models and proxying requests.
-			</div>
+						<div
+							v-if="providers.length === 0"
+							class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
+						>
+							Add a provider above to start discovering models and proxying requests.
+						</div>
 
-			<div v-else class="grid gap-[18px] lg:grid-cols-2">
-				<ProviderCard
-					v-for="provider in providers"
-					:key="provider.id"
-					:provider="provider"
-					:syncing="syncingProviderId === provider.id"
-					:pending-rules="pendingModelDisableRules"
-					@edit="beginEdit(provider)"
-					@sync="syncProvider(provider)"
-					@select-rule="toggleModelDisableRule(provider, $event)"
-					@delete="removeProvider(provider)"
-				/>
-			</div>
+						<div v-else class="grid gap-[18px] lg:grid-cols-2">
+							<ProviderCard
+								v-for="provider in providers"
+								:key="provider.id"
+								:provider="provider"
+								:syncing="syncingProviderId === provider.id"
+								:pending-rules="pendingModelDisableRules"
+								@edit="beginEdit(provider)"
+								@sync="syncProvider(provider)"
+								@select-rule="toggleModelDisableRule(provider, $event)"
+								@delete="removeProvider(provider)"
+							/>
+						</div>
 					</section>
 
 					<section
 						data-anchor="models"
 						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 					>
-			<div class="mb-5 flex items-start justify-between gap-3">
-				<div>
-					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model catalog</p>
-					<h2>Aggregated routing table</h2>
-				</div>
-				<span class="text-ink-soft">{{ modelCount }} routable models</span>
-			</div>
+						<div class="mb-5 flex items-start justify-between gap-3">
+							<div>
+								<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Model catalog</p>
+								<h2>Aggregated routing table</h2>
+							</div>
+							<span class="text-ink-soft">{{ modelCount }} routable models</span>
+						</div>
 
-			<div
-				v-if="models.length === 0"
-				class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
-			>
-				Sync at least one provider catalog to populate the gateway&apos;s model routes.
-			</div>
+						<div
+							v-if="models.length === 0"
+							class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
+						>
+							Sync at least one provider catalog to populate the gateway&apos;s model routes.
+						</div>
 
-			<div v-else class="grid gap-[18px] lg:grid-cols-3">
-				<ModelCard
-					v-for="model in models"
-					:key="model.id"
-					:model="model"
-					:pending-rules="pendingModelDisableRules"
-					@select-rule="toggleModelDisableRule($event, model.id)"
-				/>
-			</div>
+						<div v-else class="grid gap-[18px] lg:grid-cols-3">
+							<ModelCard
+								v-for="model in models"
+								:key="model.id"
+								:model="model"
+								:pending-rules="pendingModelDisableRules"
+								@select-rule="toggleModelDisableRule($event, model.id)"
+							/>
+						</div>
 					</section>
 
 					<section
 						data-anchor="request-logs"
 						class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
 					>
-			<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-				<div>
-					<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Request audit</p>
-					<h2>Recent gateway traffic</h2>
-				</div>
-				<span class="text-ink-soft">{{ requestLogCount }} recent rows</span>
-			</div>
+						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+							<div>
+								<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Request audit</p>
+								<h2>Recent gateway traffic</h2>
+							</div>
+							<span class="text-ink-soft">{{ requestLogCount }} recent rows</span>
+						</div>
 
-			<div data-anchor="request-log-clear" class="mb-5 grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
-				<div>
-					<h3>Clear logs</h3>
-					<p class="mt-1.5 leading-[1.6] text-ink-soft">Delete request history by provider, by requested-at range, or both.</p>
-				</div>
+						<div data-anchor="request-log-clear" class="mb-5 grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+							<div>
+								<h3>Clear logs</h3>
+								<p class="mt-1.5 leading-[1.6] text-ink-soft">Delete request history by provider, by requested-at range, or both.</p>
+							</div>
 
-				<div class="grid gap-4 md:grid-cols-3">
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">Provider</span>
-						<select
-							v-model="clearRequestLogsForm.providerId"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							<div class="grid gap-4 md:grid-cols-3">
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">Provider</span>
+									<select
+										v-model="clearRequestLogsForm.providerId"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+									>
+										<option value="">All providers</option>
+										<option v-for="provider in providers" :key="provider.id" :value="String(provider.id)">
+											{{ provider.name }}
+										</option>
+									</select>
+								</label>
+
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">From</span>
+									<input
+										v-model="clearRequestLogsForm.from"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										type="datetime-local"
+										step="60"
+									/>
+								</label>
+
+								<label class="grid gap-2">
+									<span class="text-[0.92rem] font-bold text-ink-strong">To</span>
+									<input
+										v-model="clearRequestLogsForm.to"
+										class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										type="datetime-local"
+										step="60"
+									/>
+								</label>
+							</div>
+
+							<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+								<button
+									class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+									type="button"
+									@click="resetRequestLogFilters"
+								>
+									Reset filters
+								</button>
+								<button
+									class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
+									type="button"
+									:disabled="clearingLogs"
+									@click="clearLogs"
+								>
+									{{ clearingLogs ? 'Clearing…' : 'Clear matching logs' }}
+								</button>
+							</div>
+						</div>
+
+						<div
+							v-if="requestLogs.length === 0"
+							class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
 						>
-							<option value="">All providers</option>
-							<option v-for="provider in providers" :key="provider.id" :value="String(provider.id)">
-								{{ provider.name }}
-							</option>
-						</select>
-					</label>
+							No gateway requests have been recorded yet.
+						</div>
 
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">From</span>
-						<input
-							v-model="clearRequestLogsForm.from"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							type="datetime-local"
-							step="60"
-						/>
-					</label>
-
-					<label class="grid gap-2">
-						<span class="text-[0.92rem] font-bold text-ink-strong">To</span>
-						<input
-							v-model="clearRequestLogsForm.to"
-							class="w-full rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-							type="datetime-local"
-							step="60"
-						/>
-					</label>
-				</div>
-
-				<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-					<button
-						class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-						type="button"
-						@click="resetRequestLogFilters"
-					>
-						Reset filters
-					</button>
-					<button
-						class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-[18px] font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-						type="button"
-						:disabled="clearingLogs"
-						@click="clearLogs"
-					>
-						{{ clearingLogs ? 'Clearing…' : 'Clear matching logs' }}
-					</button>
-				</div>
-			</div>
-
-			<div
-				v-if="requestLogs.length === 0"
-				class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
-			>
-				No gateway requests have been recorded yet.
-			</div>
-
-			<div v-else class="grid gap-[18px]">
-				<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
-			</div>
+						<div v-else class="grid gap-[18px]">
+							<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
+						</div>
 					</section>
 				</div>
 

@@ -1,8 +1,7 @@
 <script setup lang="ts">
+import type { RequestStatsView, StatsRangeOption } from '../types'
 import StatCard from './StatCard.vue'
 import TokenUsageChart from './TokenUsageChart.vue'
-
-import type { RequestStatsView, StatsRangeOption } from '../types'
 
 const props = defineProps<{
 	stats: RequestStatsView | null
@@ -31,9 +30,7 @@ function onRangeChange(event: Event) {
 			<div>
 				<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Stats</p>
 				<h2>Gateway traffic and token usage</h2>
-				<p v-if="props.stats" class="mt-1.5 leading-[1.6] text-ink-soft">
-					Summary window: {{ props.stats.rangeLabel }}
-				</p>
+				<p v-if="props.stats" class="mt-1.5 leading-[1.6] text-ink-soft">Summary window: {{ props.stats.rangeLabel }}</p>
 			</div>
 
 			<div class="flex flex-wrap items-center gap-3 max-lg:flex-col max-lg:items-stretch">
@@ -96,10 +93,7 @@ function onRangeChange(event: Event) {
 			Loading stats…
 		</div>
 
-		<div
-			v-else
-			class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
-		>
+		<div v-else class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft">
 			No stats are available yet.
 		</div>
 	</section>

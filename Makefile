@@ -1,4 +1,4 @@
-.PHONY: build go-build test web-dev web-build
+.PHONY: build go-build test web-dev web-build fmt tidy
 
 build: go-build
 
@@ -13,3 +13,9 @@ web-dev:
 
 web-build:
 	pnpm --dir web build
+
+fmt:
+	gofmt -w server tests
+
+tidy:
+	go mod tidy

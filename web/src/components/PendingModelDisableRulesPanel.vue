@@ -26,7 +26,9 @@ function actionLabel(rule: PendingModelDisableRule) {
 		class="fixed right-6 top-6 z-20 hidden min-[1848px]:block"
 		aria-label="Pending model disable rule changes"
 	>
-		<div class="w-[280px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.78)] p-4 shadow-[0_20px_48px_rgba(22,34,49,0.12)] backdrop-blur-[18px]">
+		<div
+			class="w-[280px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.78)] p-4 shadow-[0_20px_48px_rgba(22,34,49,0.12)] backdrop-blur-[18px]"
+		>
 			<div class="grid gap-2">
 				<div class="flex items-start justify-between gap-3">
 					<div>
@@ -37,30 +39,17 @@ function actionLabel(rule: PendingModelDisableRule) {
 						{{ props.rules.length }}
 					</span>
 				</div>
-				<p class="text-sm leading-[1.6] text-ink-soft">
-					Stage multiple provider/model route changes, then apply them together.
-				</p>
+				<p class="text-sm leading-[1.6] text-ink-soft">Stage multiple provider/model route changes, then apply them together.</p>
 			</div>
 
 			<div class="mt-4 grid max-h-[420px] gap-2.5 overflow-y-auto pr-1">
-				<div
-					v-for="rule in props.rules"
-					:key="`${rule.providerId}:${rule.modelId}`"
-					class="rounded-[18px] border border-line bg-white/80 p-3"
-				>
+				<div v-for="rule in props.rules" :key="`${rule.providerId}:${rule.modelId}`" class="rounded-[18px] border border-line bg-white/80 p-3">
 					<div class="flex items-start justify-between gap-3">
 						<div class="min-w-0">
-							<p
-								:class="[
-									'text-[0.72rem] font-bold uppercase tracking-[0.16em]',
-									rule.disabled ? 'text-danger' : 'text-accent',
-								]"
-							>
+							<p :class="['text-[0.72rem] font-bold uppercase tracking-[0.16em]', rule.disabled ? 'text-danger' : 'text-accent']">
 								{{ actionLabel(rule) }}
 							</p>
-							<p class="mt-1 break-words font-mono text-[0.82rem] font-bold text-ink-strong">
-								{{ rule.providerName }} · {{ rule.modelId }}
-							</p>
+							<p class="mt-1 break-words font-mono text-[0.82rem] font-bold text-ink-strong">{{ rule.providerName }} · {{ rule.modelId }}</p>
 						</div>
 						<button
 							class="border-0 bg-transparent p-0 text-sm font-bold text-ink-soft transition duration-150 ease-out hover:text-ink-strong"

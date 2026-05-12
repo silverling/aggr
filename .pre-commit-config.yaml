@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: make fmt
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: make tidy
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: prettier
+        name: prettier
+        entry: pnpm --dir web format
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]

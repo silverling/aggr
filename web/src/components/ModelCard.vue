@@ -33,7 +33,7 @@ function pendingRule(providerId: number) {
 						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: isSelected(provider.id)
 							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
-						: 'border-[rgba(200,93,53,0.14)] bg-[rgba(200,93,53,0.08)] text-accent-strong',
+							: 'border-[rgba(200,93,53,0.14)] bg-[rgba(200,93,53,0.08)] text-accent-strong',
 				]"
 				type="button"
 				@click="emit('select-rule', provider)"

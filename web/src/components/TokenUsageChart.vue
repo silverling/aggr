@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-
 import type { RequestStatsBucket } from '../types'
+import { computed } from 'vue'
 
 const props = defineProps<{
 	title: string
@@ -15,10 +14,7 @@ const compactNumberFormatter = new Intl.NumberFormat(undefined, {
 })
 
 const maxConsumedTokens = computed(() =>
-	Math.max(
-		1,
-		...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens),
-	),
+	Math.max(1, ...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens)),
 )
 
 function formatCompactNumber(value: number) {
@@ -76,7 +72,9 @@ function bucketTitle(bucket: RequestStatsBucket) {
 			:style="{ gridTemplateColumns: `repeat(${props.buckets.length}, minmax(0, 1fr))` }"
 		>
 			<div v-for="bucket in props.buckets" :key="bucket.start" class="grid gap-2">
-				<span class="text-center font-mono text-[0.78rem] text-ink-soft">{{ bucket.consumedTokens === 0 ? '0' : formatCompactNumber(bucket.consumedTokens) }}</span>
+				<span class="text-center font-mono text-[0.78rem] text-ink-soft">{{
+					bucket.consumedTokens === 0 ? '0' : formatCompactNumber(bucket.consumedTokens)
+				}}</span>
 				<div
 					class="relative flex h-[190px] items-end justify-center rounded-[18px] border border-line bg-[rgba(255,255,255,0.52)] px-2 pb-2 pt-4"
 					:title="bucketTitle(bucket)"

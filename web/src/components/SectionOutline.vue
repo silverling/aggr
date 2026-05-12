@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-
 import type { SectionOutlineItem } from '../types'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{
 	items: SectionOutlineItem[]
@@ -105,11 +104,10 @@ watch(
 </script>
 
 <template>
-	<aside
-		class="fixed left-6 top-6 z-20 hidden min-[1848px]:block"
-		aria-label="Dashboard section outline"
-	>
-		<div class="w-[220px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]">
+	<aside class="fixed left-6 top-6 z-20 hidden min-[1848px]:block" aria-label="Dashboard section outline">
+		<div
+			class="w-[220px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]"
+		>
 			<p class="px-2.5 pb-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Outline</p>
 			<nav class="grid gap-1.5">
 				<button
@@ -128,7 +126,9 @@ watch(
 						<span
 							:class="[
 								'h-2 w-2 rounded-full transition duration-150 ease-out',
-								activeAnchor === item.anchor ? 'bg-accent shadow-[0_0_0_5px_rgba(12,118,98,0.12)]' : 'bg-[rgba(24,34,47,0.16)] group-hover:bg-accent/70',
+								activeAnchor === item.anchor
+									? 'bg-accent shadow-[0_0_0_5px_rgba(12,118,98,0.12)]'
+									: 'bg-[rgba(24,34,47,0.16)] group-hover:bg-accent/70',
 							]"
 						/>
 						<span class="text-[0.94rem] font-bold leading-[1.25]">{{ item.label }}</span>

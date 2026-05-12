@@ -85,9 +85,9 @@ function pendingRule(modelId: string) {
 						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: isSelected(model)
 							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
-						: isModelDisabled(model)
-							? 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger'
-							: 'border-accent-soft bg-[rgba(12,118,98,0.08)] text-accent',
+							: isModelDisabled(model)
+								? 'border-[rgba(164,63,63,0.18)] bg-danger-soft text-danger'
+								: 'border-accent-soft bg-[rgba(12,118,98,0.08)] text-accent',
 				]"
 				type="button"
 				@click="emit('select-rule', model)"
