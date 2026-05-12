@@ -27,10 +27,21 @@ fi
 
 CONTRIBUTORS=""
 if [ -n "${CONTRIBUTORS_FILE}" ] && [ -f "${CONTRIBUTORS_FILE}" ]; then
-	CONTRIBUTORS="$(grep -v '^[[:space:]]*$' "${CONTRIBUTORS_FILE}" | sort -u | sed 's/^/- @/')"
+	CONTRIBUTORS="$(grep -v '^[[:space:]]*$' "${CONTRIBUTORS_FILE}" || true)"
+	if [ -n "${CONTRIBUTORS}" ]; then
+		CONTRIBUTORS="$(printf '%s\n' "${CONTRIBUTORS}" | sort -u | sed 's/^/- @/')"
+	fi
 fi
-if [ -z "${CONTRIBUTORS}" ]; then
-	CONTRIBUTORS="- No pull-request contributors recorded."
+
+CONTRIBUTORS_SECTION=""
+if [ -n "${CONTRIBUTORS}" ]; then
+	CONTRIBUTORS_SECTION="$(cat <<EOF
+
+### Contributors
+
+${CONTRIBUTORS}
+EOF
+)"
 fi
 
 RELEASE_NOTES_FILE="$(mktemp)"
@@ -38,10 +49,7 @@ cat >"${RELEASE_NOTES_FILE}" <<EOF
 ## ${VERSION} - ${DATE_UTC}
 
 ${COMMITS}
-
-### Contributors
-
-${CONTRIBUTORS}
+${CONTRIBUTORS_SECTION}
 EOF
 
 printf '%s\n' "${RELEASE_NOTES_FILE}"
