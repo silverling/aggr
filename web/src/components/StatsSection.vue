@@ -22,24 +22,19 @@ function onRangeChange(event: Event) {
 </script>
 
 <template>
-	<section
-		data-anchor="request-stats"
-		class="rounded-[var(--radius-panel)] border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7"
-	>
+	<section data-anchor="request-stats" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
 		<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 			<div>
-				<p class="mb-3 text-xs font-bold uppercase tracking-[0.1em] text-accent">Stats</p>
-				<h2>Gateway traffic and token usage</h2>
-				<p v-if="props.stats" class="mt-1.5 leading-[1.6] text-ink-soft">Summary window: {{ props.stats.rangeLabel }}</p>
+				<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Stats</p>
+				<h2>Traffic and usage</h2>
 			</div>
 
 			<div class="flex flex-wrap items-center gap-3 max-lg:flex-col max-lg:items-stretch">
-				<label class="grid gap-2">
-					<span class="text-[0.92rem] font-bold text-ink-strong">Date range</span>
+				<label class="flex items-center gap-2">
 					<select
 						data-anchor="stats-range"
 						:value="props.range"
-						class="min-w-[200px] rounded-[var(--radius-field)] border border-line-strong bg-white/90 px-4 py-[15px] text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+						class="min-w-50 rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-2 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 						@change="onRangeChange"
 					>
 						<option v-for="option in props.rangeOptions" :key="option.value" :value="option.value">
@@ -60,8 +55,8 @@ function onRangeChange(event: Event) {
 			{{ props.error }}
 		</p>
 
-		<div v-if="props.stats" class="grid gap-[18px]">
-			<div class="grid gap-[18px] md:grid-cols-2 xl:grid-cols-4">
+		<div v-if="props.stats" class="grid gap-4.5">
+			<div class="grid gap-4.5 md:grid-cols-2 xl:grid-cols-4">
 				<StatCard label="Requests" :value="props.stats.summary.requests" description="Audited requests in the selected range" />
 				<StatCard label="Succeeded" :value="props.stats.summary.succeeded" description="Completed requests with 2xx responses" />
 				<StatCard label="Failed" :value="props.stats.summary.failed" description="Completed requests with non-2xx responses" />
@@ -72,7 +67,7 @@ function onRangeChange(event: Event) {
 				<StatCard label="Output Tokens" :value="props.stats.summary.outputTokens" description="Generated output tokens" />
 			</div>
 
-			<div class="grid gap-[18px] xl:grid-cols-2">
+			<div class="grid gap-4.5 xl:grid-cols-2">
 				<TokenUsageChart
 					title="Recent 7 days"
 					subtitle="Token usage grouped by day from the last seven calendar days."
@@ -88,12 +83,12 @@ function onRangeChange(event: Event) {
 
 		<div
 			v-else-if="props.loading"
-			class="rounded-[var(--radius-card)] border border-dashed border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft"
+			class="rounded-card border border-dashed border-line bg-surface-strong px-5.5 py-6.5 leading-[1.6] text-ink-soft"
 		>
 			Loading stats…
 		</div>
 
-		<div v-else class="rounded-[var(--radius-card)] border border-line bg-surface-strong px-[22px] py-[26px] leading-[1.6] text-ink-soft">
+		<div v-else class="rounded-card border border-line bg-surface-strong px-5.5 py-6.5 leading-[1.6] text-ink-soft">
 			No stats are available yet.
 		</div>
 	</section>
