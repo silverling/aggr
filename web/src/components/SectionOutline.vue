@@ -106,7 +106,7 @@ watch(
 
 <template>
 	<aside
-		class="sticky top-6 hidden self-start xl:block"
+		class="fixed left-6 top-6 z-20 hidden min-[1848px]:block"
 		aria-label="Dashboard section outline"
 	>
 		<div class="w-[220px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]">

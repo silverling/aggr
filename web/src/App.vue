@@ -987,14 +987,7 @@ onMounted(() => {
 		</div>
 
 		<template v-else>
-			<div
-				:class="[
-					'xl:grid xl:gap-6',
-					pendingModelDisableRuleCount > 0
-						? 'xl:grid-cols-[220px_minmax(0,1fr)_280px]'
-						: 'xl:grid-cols-[220px_minmax(0,1fr)]',
-				]"
-			>
+			<div class="relative">
 				<SectionOutline :items="sectionOutlineItems" />
 
 				<div class="grid min-w-0 gap-[22px]">
@@ -1317,12 +1310,12 @@ onMounted(() => {
 
 					<div
 						v-if="pendingModelDisableRuleCount === 0"
-						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft xl:hidden"
+						class="rounded-[16px] border border-dashed border-line bg-white/50 px-3.5 py-4 leading-[1.6] text-ink-soft min-[1848px]:hidden"
 					>
 						No pending route changes are staged yet.
 					</div>
 
-					<div v-else class="grid gap-3 xl:hidden">
+					<div v-else class="grid gap-3 min-[1848px]:hidden">
 						<div
 							v-for="rule in pendingModelDisableRules"
 							:key="`${rule.providerId}:${rule.modelId}`"

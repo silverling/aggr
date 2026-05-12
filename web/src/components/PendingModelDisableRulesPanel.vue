@@ -23,7 +23,7 @@ function actionLabel(rule: PendingModelDisableRule) {
 	<aside
 		v-if="props.rules.length > 0"
 		data-anchor="model-disable-rule-pending"
-		class="sticky top-6 hidden self-start xl:block"
+		class="fixed right-6 top-6 z-20 hidden min-[1848px]:block"
 		aria-label="Pending model disable rule changes"
 	>
 		<div class="w-[280px] rounded-[24px] border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.78)] p-4 shadow-[0_20px_48px_rgba(22,34,49,0.12)] backdrop-blur-[18px]">
