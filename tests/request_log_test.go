@@ -374,6 +374,196 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 }
 
+// TestProxyHTTPUserAgentPreservation verifies that proxied HTTP requests keep
+// the caller's User-Agent when the provider does not override it, fall back to
+// the provider value when the caller omits it, and let an explicit provider
+// override win when configured.
+func TestProxyHTTPUserAgentPreservation(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name              string
+		providerUserAgent string
+		requestUserAgent  string
+		wantUserAgent     string
+	}{
+		{
+			name:              "preserves caller header when provider has no override",
+			providerUserAgent: "",
+			requestUserAgent:  "CallerHTTP/1.0",
+			wantUserAgent:     "CallerHTTP/1.0",
+		},
+		{
+			name:              "uses provider header when caller omits one",
+			providerUserAgent: "ProviderHTTP/1.0",
+			requestUserAgent:  "",
+			wantUserAgent:     "ProviderHTTP/1.0",
+		},
+		{
+			name:              "provider override wins over caller header",
+			providerUserAgent: "ProviderHTTP/2.0",
+			requestUserAgent:  "CallerHTTP/2.0",
+			wantUserAgent:     "ProviderHTTP/2.0",
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			var upstreamMu sync.Mutex
+			var upstreamUserAgent string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/models" {
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
+					return
+				}
+
+				if r.URL.Path != "/v1/chat/completions" {
+					http.NotFound(w, r)
+					return
+				}
+
+				upstreamMu.Lock()
+				upstreamUserAgent = r.Header.Get("User-Agent")
+				upstreamMu.Unlock()
+
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				_, _ = io.WriteString(w, `{"id":"chatcmpl_test","object":"chat.completion","model":"gpt-4.1"}`)
+			}))
+			defer upstream.Close()
+
+			gatewayURL, client := newTestGatewayServer(t)
+			createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", testCase.providerUserAgent)
+			apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "User-Agent HTTP test key")
+			v1Client := newAuthenticatedAPIClient(client, apiKey)
+
+			request, err := http.NewRequest(http.MethodPost, gatewayURL+"/v1/chat/completions", strings.NewReader(`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`))
+			if err != nil {
+				t.Fatalf("create proxy request: %v", err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			if testCase.requestUserAgent == "" {
+				request.Header.Set("User-Agent", "")
+			} else {
+				request.Header.Set("User-Agent", testCase.requestUserAgent)
+			}
+
+			response, err := v1Client.Do(request)
+			if err != nil {
+				t.Fatalf("perform proxy request: %v", err)
+			}
+			defer response.Body.Close()
+
+			if response.StatusCode != http.StatusOK {
+				body, readErr := io.ReadAll(response.Body)
+				if readErr != nil {
+					t.Fatalf("read failing response body: %v", readErr)
+				}
+				t.Fatalf("proxy status = %d, want %d; body = %s", response.StatusCode, http.StatusOK, string(body))
+			}
+
+			upstreamMu.Lock()
+			gotUserAgent := upstreamUserAgent
+			upstreamMu.Unlock()
+			if gotUserAgent != testCase.wantUserAgent {
+				t.Fatalf("upstream user agent = %q, want %q", gotUserAgent, testCase.wantUserAgent)
+			}
+		})
+	}
+}
+
+// TestProxyHTTPUpstreamHeaderOmissions verifies that proxied HTTP requests do
+// not leak forwarding metadata or SDK transport headers to upstream providers.
+func TestProxyHTTPUpstreamHeaderOmissions(t *testing.T) {
+	t.Parallel()
+
+	var upstreamMu sync.Mutex
+	var upstreamHeaders http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
+			return
+		}
+
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		upstreamMu.Lock()
+		upstreamHeaders = r.Header.Clone()
+		upstreamMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_test","object":"chat.completion","model":"gpt-4.1"}`)
+	}))
+	defer upstream.Close()
+
+	gatewayURL, client := newTestGatewayServer(t)
+	createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", "")
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Header omission HTTP test key")
+	v1Client := newAuthenticatedAPIClient(client, apiKey)
+
+	request, err := http.NewRequest(http.MethodPost, gatewayURL+"/v1/chat/completions?trace=1", strings.NewReader(`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("create proxy request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", "CallerHTTP/omit")
+	request.Header.Set("Via", "1.1 Caddy")
+	request.Header.Set("X-Forwarded-For", "192.168.1.6")
+	request.Header.Set("X-Forwarded-Host", "example.com")
+	request.Header.Set("X-Forwarded-Proto", "https")
+
+	response, err := v1Client.Do(request)
+	if err != nil {
+		t.Fatalf("perform proxy request: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			t.Fatalf("read failing response body: %v", readErr)
+		}
+		t.Fatalf("proxy status = %d, want %d; body = %s", response.StatusCode, http.StatusOK, string(body))
+	}
+
+	upstreamMu.Lock()
+	gotHeaders := upstreamHeaders.Clone()
+	upstreamMu.Unlock()
+
+	omittedHeaders := []string{
+		"Via",
+		"X-Forwarded-For",
+		"X-Forwarded-Host",
+		"X-Forwarded-Proto",
+		"X-Stainless-Arch",
+		"X-Stainless-Lang",
+		"X-Stainless-OS",
+		"X-Stainless-Package-Version",
+		"X-Stainless-Retry-Count",
+		"X-Stainless-Runtime",
+		"X-Stainless-Runtime-Version",
+	}
+	for _, header := range omittedHeaders {
+		if gotHeaders.Get(header) != "" {
+			t.Fatalf("upstream header %s = %q, want omitted", header, gotHeaders.Get(header))
+		}
+	}
+
+	if gotHeaders.Get("User-Agent") != "CallerHTTP/omit" {
+		t.Fatalf("upstream user agent = %q, want %q", gotHeaders.Get("User-Agent"), "CallerHTTP/omit")
+	}
+	if gotHeaders.Get("Authorization") != "Bearer test-key" {
+		t.Fatalf("upstream authorization = %q, want %q", gotHeaders.Get("Authorization"), "Bearer test-key")
+	}
+}
+
 // TestHTTPRequestLoggingIncludesStatusCode verifies that the request logging
 // middleware records the final HTTP status code alongside the method and path.
 func TestHTTPRequestLoggingIncludesStatusCode(t *testing.T) {
@@ -535,6 +725,225 @@ func TestResponsesWebSocketMode(t *testing.T) {
 	}
 	if !strings.Contains(log.ReceivedResponse.Body, `"type":"response.completed"`) {
 		t.Fatalf("responses websocket response body = %q, want completed event", log.ReceivedResponse.Body)
+	}
+}
+
+// TestResponsesWebSocketUserAgentPreservation verifies that websocket-mode
+// upstream dials follow the same User-Agent precedence as proxied HTTP calls.
+func TestResponsesWebSocketUserAgentPreservation(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name              string
+		providerUserAgent string
+		requestUserAgent  string
+		wantUserAgent     string
+	}{
+		{
+			name:              "preserves caller header when provider has no override",
+			providerUserAgent: "",
+			requestUserAgent:  "CallerWS/1.0",
+			wantUserAgent:     "CallerWS/1.0",
+		},
+		{
+			name:              "uses provider header when caller omits one",
+			providerUserAgent: "ProviderWS/1.0",
+			requestUserAgent:  "",
+			wantUserAgent:     "ProviderWS/1.0",
+		},
+		{
+			name:              "provider override wins over caller header",
+			providerUserAgent: "ProviderWS/2.0",
+			requestUserAgent:  "CallerWS/2.0",
+			wantUserAgent:     "ProviderWS/2.0",
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			var upstreamMu sync.Mutex
+			var upstreamUserAgent string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/models" {
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
+					return
+				}
+
+				if r.URL.Path != "/v1/responses" {
+					http.NotFound(w, r)
+					return
+				}
+
+				upstreamMu.Lock()
+				upstreamUserAgent = r.Header.Get("User-Agent")
+				upstreamMu.Unlock()
+
+				conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+					InsecureSkipVerify: true,
+				})
+				if err != nil {
+					t.Errorf("accept upstream websocket: %v", err)
+					return
+				}
+				defer conn.CloseNow()
+
+				if _, _, err := conn.Read(context.Background()); err != nil {
+					t.Errorf("read upstream websocket payload: %v", err)
+					return
+				}
+
+				if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"response.completed","sequence_number":1,"response":{"id":"resp_test","status":"completed"}}`)); err != nil {
+					t.Errorf("write upstream websocket response: %v", err)
+					return
+				}
+
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+			}))
+			defer upstream.Close()
+
+			gatewayURL, client := newTestGatewayServer(t)
+			createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", testCase.providerUserAgent)
+			createTestModelAlias(t, client, gatewayURL, "alias-responses", "gpt-4.1", nil)
+			apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Responses websocket UA key")
+
+			dialHeaders := http.Header{}
+			if testCase.requestUserAgent == "" {
+				dialHeaders.Set("User-Agent", "")
+			} else {
+				dialHeaders.Set("User-Agent", testCase.requestUserAgent)
+			}
+
+			conn, _, err := websocket.Dial(context.Background(), strings.Replace(gatewayURL, "http://", "ws://", 1)+"/v1/responses", &websocket.DialOptions{
+				HTTPClient: &http.Client{
+					Transport: &websocketDialHeaderRoundTripper{apiKey: apiKey},
+				},
+				HTTPHeader: dialHeaders,
+			})
+			if err != nil {
+				t.Fatalf("dial gateway websocket: %v", err)
+			}
+			defer conn.CloseNow()
+
+			if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"response.create","response":{"model":"alias-responses","input":"hello"}}`)); err != nil {
+				t.Fatalf("write gateway websocket request: %v", err)
+			}
+
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				t.Fatalf("read gateway websocket response: %v", err)
+			}
+
+			upstreamMu.Lock()
+			gotUserAgent := upstreamUserAgent
+			upstreamMu.Unlock()
+			if gotUserAgent != testCase.wantUserAgent {
+				t.Fatalf("upstream websocket user agent = %q, want %q", gotUserAgent, testCase.wantUserAgent)
+			}
+		})
+	}
+}
+
+// TestResponsesWebSocketUpstreamHeaderOmissions verifies that websocket-mode
+// upstream handshakes do not leak forwarding metadata to the provider.
+func TestResponsesWebSocketUpstreamHeaderOmissions(t *testing.T) {
+	t.Parallel()
+
+	var upstreamMu sync.Mutex
+	var upstreamHeaders http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-4.1"}]}`)
+			return
+		}
+
+		if r.URL.Path != "/v1/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		upstreamMu.Lock()
+		upstreamHeaders = r.Header.Clone()
+		upstreamMu.Unlock()
+
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			t.Errorf("accept upstream websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+
+		if _, _, err := conn.Read(context.Background()); err != nil {
+			t.Errorf("read upstream websocket payload: %v", err)
+			return
+		}
+
+		if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"response.completed","sequence_number":1,"response":{"id":"resp_test","status":"completed"}}`)); err != nil {
+			t.Errorf("write upstream websocket response: %v", err)
+			return
+		}
+
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}))
+	defer upstream.Close()
+
+	gatewayURL, client := newTestGatewayServer(t)
+	createTestProvider(t, client, gatewayURL, upstream.URL+"/v1", "")
+	createTestModelAlias(t, client, gatewayURL, "alias-responses", "gpt-4.1", nil)
+	apiKey := createTestGatewayAPIKey(t, client, gatewayURL, "Responses websocket omission key")
+
+	dialHeaders := http.Header{}
+	dialHeaders.Set("User-Agent", "CallerWS/omit")
+	dialHeaders.Set("Via", "1.1 Caddy")
+	dialHeaders.Set("X-Forwarded-For", "192.168.1.6")
+	dialHeaders.Set("X-Forwarded-Host", "example.com")
+	dialHeaders.Set("X-Forwarded-Proto", "https")
+
+	conn, _, err := websocket.Dial(context.Background(), strings.Replace(gatewayURL, "http://", "ws://", 1)+"/v1/responses", &websocket.DialOptions{
+		HTTPClient: &http.Client{
+			Transport: &websocketDialHeaderRoundTripper{apiKey: apiKey},
+		},
+		HTTPHeader: dialHeaders,
+	})
+	if err != nil {
+		t.Fatalf("dial gateway websocket: %v", err)
+	}
+	defer conn.CloseNow()
+
+	if err := conn.Write(context.Background(), websocket.MessageText, []byte(`{"type":"response.create","response":{"model":"alias-responses","input":"hello"}}`)); err != nil {
+		t.Fatalf("write gateway websocket request: %v", err)
+	}
+
+	if _, _, err := conn.Read(context.Background()); err != nil {
+		t.Fatalf("read gateway websocket response: %v", err)
+	}
+
+	upstreamMu.Lock()
+	gotHeaders := upstreamHeaders.Clone()
+	upstreamMu.Unlock()
+
+	omittedHeaders := []string{
+		"Via",
+		"X-Forwarded-For",
+		"X-Forwarded-Host",
+		"X-Forwarded-Proto",
+	}
+	for _, header := range omittedHeaders {
+		if gotHeaders.Get(header) != "" {
+			t.Fatalf("upstream websocket header %s = %q, want omitted", header, gotHeaders.Get(header))
+		}
+	}
+
+	if gotHeaders.Get("User-Agent") != "CallerWS/omit" {
+		t.Fatalf("upstream websocket user agent = %q, want %q", gotHeaders.Get("User-Agent"), "CallerWS/omit")
+	}
+	if gotHeaders.Get("Authorization") != "Bearer test-key" {
+		t.Fatalf("upstream websocket authorization = %q, want %q", gotHeaders.Get("Authorization"), "Bearer test-key")
 	}
 }
 

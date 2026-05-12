@@ -710,11 +710,6 @@ func (s *store) listProviderViews(ctx context.Context) ([]providerView, error) {
 	return views, nil
 }
 
-// getProvider retrieves a provider together with its synced models.
-func (s *store) getProvider(ctx context.Context, id int64) (providerRecord, error) {
-	return s.getProviderWithModels(ctx, id)
-}
-
 // getProviderWithModels loads one provider and its model list from the database.
 func (s *store) getProviderWithModels(ctx context.Context, id int64) (providerRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
@@ -813,17 +808,6 @@ func (s *store) deleteProvider(ctx context.Context, id int64) error {
 	}
 
 	return nil
-}
-
-// setProviderModelDisabled creates or removes one provider/model disable rule.
-func (s *store) setProviderModelDisabled(ctx context.Context, providerID int64, modelID string, disabled bool) error {
-	return s.setProviderModelDisabledBatch(ctx, []modelDisableRuleMutation{
-		{
-			ProviderID: providerID,
-			ModelID:    modelID,
-			Disabled:   disabled,
-		},
-	})
 }
 
 // setProviderModelDisabledBatch creates or removes multiple provider/model
@@ -1723,21 +1707,6 @@ func (s *store) listDisabledModelsForProvider(ctx context.Context, providerID in
 	}
 
 	return modelIDs, nil
-}
-
-// providerServesModel reports whether a provider currently has a synced mapping
-// for the requested model ID.
-func (s *store) providerServesModel(ctx context.Context, providerID int64, modelID string) (bool, error) {
-	var count int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(1)
-		FROM provider_models
-		WHERE provider_id = ? AND model_id = ?
-	`, providerID, modelID).Scan(&count); err != nil {
-		return false, fmt.Errorf("query provider model mapping: %w", err)
-	}
-
-	return count > 0, nil
 }
 
 // scanProxyRequestLog reads a proxy request audit row from either a query row or iterator.

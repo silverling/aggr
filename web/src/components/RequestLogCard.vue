@@ -174,17 +174,20 @@ function formatHeaders(value?: string) {
 </script>
 
 <template>
-	<details data-anchor="request-log-card" class="rounded-card border border-line bg-surface-strong p-4.5">
-		<summary class="list-none cursor-pointer">
+	<details
+		data-anchor="request-log-card"
+		class="group rounded-card border border-line bg-surface-strong p-2 transition duration-150 ease-out hover:-translate-y-px hover:border-[rgba(12,118,98,0.18)] hover:shadow-sm"
+	>
+		<summary class="list-none cursor-pointer transition duration-150 ease-out">
 			<div class="flex flex-wrap items-start justify-between gap-3">
 				<div class="grid gap-16 grid-cols-[auto_1fr]">
 					<div class="flex flex-wrap items-center gap-2.5">
 						<span
-							class="inline-flex items-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-3 py-1.5 font-mono text-[0.78rem] font-bold uppercase tracking-[0.18em] text-ink-strong"
+							class="inline-flex items-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-3 py-1.5 font-mono text-[0.78rem] font-bold uppercase tracking-[0.18em] text-ink-strong transition duration-150 ease-out group-hover:border-[rgba(12,118,98,0.2)] group-hover:bg-white"
 						>
 							{{ props.requestLog.receivedRequest.method }}
 						</span>
-						<code class="wrap-break-word text-[0.92rem] text-ink-strong">{{
+						<code class="wrap-break-word text-[0.92rem] text-ink-strong transition duration-150 ease-out group-hover:text-accent">{{
 							formatPath(props.requestLog.receivedRequest.path, props.requestLog.receivedRequest.rawQuery)
 						}}</code>
 					</div>
@@ -213,7 +216,7 @@ function formatHeaders(value?: string) {
 			</div>
 		</summary>
 
-		<div class="mt-4 grid gap-4 border-t border-line pt-4">
+		<div class="mt-3 grid gap-4 border-t border-line pt-3">
 			<p v-if="props.requestLog.receivedResponse.error" class="rounded-[14px] bg-danger-soft px-3.5 py-3 leading-[1.55] text-danger">
 				{{ props.requestLog.receivedResponse.error }}
 			</p>

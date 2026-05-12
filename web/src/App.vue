@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Copy } from '@lucide/vue'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { ChevronsDown, Copy } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import ApiKeyCard from './components/ApiKeyCard.vue'
 import ModelAliasCard from './components/ModelAliasCard.vue'
@@ -119,6 +119,8 @@ const modelCount = computed(() => models.value.length)
 const modelAliasCount = computed(() => modelAliases.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
+const requestLogList = ref<HTMLElement | null>(null)
+const showRequestLogScrollCue = ref(false)
 const sessionCount = computed(() => sessions.value.length)
 const apiKeyCount = computed(() => apiKeys.value.length)
 const statsError = ref('')
@@ -916,12 +918,38 @@ async function clearLogs() {
 	}
 }
 
+function syncRequestLogScrollCue() {
+	const element = requestLogList.value
+	if (element === null) {
+		showRequestLogScrollCue.value = false
+		return
+	}
+
+	const remainingScroll = element.scrollHeight - element.clientHeight - element.scrollTop
+	showRequestLogScrollCue.value = remainingScroll > 12
+}
+
+function syncRequestLogScrollCueAfterRender() {
+	void nextTick(() => {
+		syncRequestLogScrollCue()
+	})
+}
+
 watch(statsRange, () => {
 	void loadStats()
 })
 
+watch(requestLogs, () => {
+	syncRequestLogScrollCueAfterRender()
+})
+
 onMounted(() => {
+	window.addEventListener('resize', syncRequestLogScrollCue)
 	void loadSessionState()
+})
+
+onBeforeUnmount(() => {
+	window.removeEventListener('resize', syncRequestLogScrollCue)
 })
 </script>
 
@@ -1659,8 +1687,22 @@ onMounted(() => {
 							No gateway requests have been recorded yet.
 						</div>
 
-						<div v-else class="grid gap-4.5">
-							<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
+						<div v-else class="relative">
+							<div ref="requestLogList" class="grid max-h-160 gap-2 overflow-y-auto pb-8 pr-1 pt-1" @scroll="syncRequestLogScrollCue">
+								<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
+							</div>
+							<div
+								v-if="showRequestLogScrollCue"
+								class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-18 rounded-b-card bg-linear-to-t from-surface-strong via-[rgba(255,252,247,0.74)] to-transparent"
+							/>
+							<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
+								<div
+									class="inline-flex items-center gap-2 rounded-full border border-line bg-[rgba(255,252,247,0.92)] px-3 py-1.5 text-[0.74rem] font-bold uppercase tracking-[0.16em] text-accent shadow-[0_10px_20px_rgba(24,34,47,0.08)] backdrop-blur-sm"
+								>
+									<ChevronsDown class="size-4" />
+									Scroll for more
+								</div>
+							</div>
 						</div>
 					</section>
 				</div>
