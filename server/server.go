@@ -12,8 +12,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -605,14 +607,42 @@ func Run() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	serverErrors := make(chan error, 1)
+	shutdownSignals := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignals, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(shutdownSignals)
+
 	logger.Info("starting aggr",
 		"addr", cfg.Addr,
 		"db", cfg.DatabasePath,
 		"environment", cfg.Environment,
 	)
 
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("run http server: %w", err)
+	// Start the listener in a background goroutine so the main run loop can
+	// react to either server failures or shutdown signals.
+	go func() {
+		serverErrors <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serverErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("run http server: %w", err)
+		}
+		return nil
+	case receivedSignal := <-shutdownSignals:
+		logger.Info("shutting down aggr", "signal", receivedSignal.String())
+	}
+
+	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShutdown()
+
+	if err := httpServer.Shutdown(shutdownContext); err != nil {
+		return fmt.Errorf("shutdown http server: %w", err)
+	}
+
+	if err := <-serverErrors; err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("wait for http server shutdown: %w", err)
 	}
 
 	return nil
