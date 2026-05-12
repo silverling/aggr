@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -44,6 +46,17 @@ type server struct {
 	syncClient  *http.Client
 	proxyClient *http.Client
 	devProxy    *httputil.ReverseProxy
+}
+
+// loggingResponseWriter wraps an HTTP response writer so the request logger can
+// record the final status code without changing handler behavior.
+type loggingResponseWriter struct {
+	// ResponseWriter is the wrapped writer that ultimately sends the response.
+	http.ResponseWriter
+	// statusCode stores the final HTTP status code returned to the client.
+	statusCode int
+	// wroteHeader reports whether the handler explicitly or implicitly sent headers.
+	wroteHeader bool
 }
 
 // providerPayload is the JSON body accepted by the provider create and update APIs.
@@ -713,9 +726,101 @@ func (s *server) handleUI(w http.ResponseWriter, r *http.Request) {
 func (s *server) withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startedAt := time.Now()
-		next.ServeHTTP(w, r)
-		s.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(startedAt))
+		writer := newLoggingResponseWriter(w)
+		next.ServeHTTP(writer, r)
+		s.logger.Info(
+			"http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", writer.statusCode,
+			"duration", time.Since(startedAt),
+		)
 	})
+}
+
+// newLoggingResponseWriter returns a response-writer wrapper initialized with
+// the default `200 OK` status used by Go when handlers never override it.
+func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK,
+	}
+}
+
+// Header returns the wrapped response header map so handlers can mutate it normally.
+func (writer *loggingResponseWriter) Header() http.Header {
+	return writer.ResponseWriter.Header()
+}
+
+// WriteHeader records the final status code before delegating to the wrapped writer.
+func (writer *loggingResponseWriter) WriteHeader(statusCode int) {
+	if writer.wroteHeader {
+		writer.ResponseWriter.WriteHeader(statusCode)
+		return
+	}
+
+	writer.statusCode = statusCode
+	writer.wroteHeader = true
+	writer.ResponseWriter.WriteHeader(statusCode)
+}
+
+// Write records the implicit `200 OK` status when handlers write a body without
+// calling `WriteHeader`, then delegates the bytes to the wrapped writer.
+func (writer *loggingResponseWriter) Write(body []byte) (int, error) {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+
+	return writer.ResponseWriter.Write(body)
+}
+
+// Flush forwards HTTP streaming flushes to the wrapped writer when it supports them.
+func (writer *loggingResponseWriter) Flush() {
+	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Hijack forwards connection hijacking to the wrapped writer when the server is
+// handling HTTP/1.x upgrades such as websocket handshakes.
+func (writer *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := writer.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("wrapped response writer does not support hijacking")
+	}
+
+	return hijacker.Hijack()
+}
+
+// Push forwards HTTP/2 server-push requests to the wrapped writer when supported.
+func (writer *loggingResponseWriter) Push(target string, options *http.PushOptions) error {
+	pusher, ok := writer.ResponseWriter.(http.Pusher)
+	if !ok {
+		return http.ErrNotSupported
+	}
+
+	return pusher.Push(target, options)
+}
+
+// ReadFrom forwards optimized stream copies to the wrapped writer while still
+// ensuring the logged status code reflects the implicit `200 OK` write.
+func (writer *loggingResponseWriter) ReadFrom(source io.Reader) (int64, error) {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+
+	readerFrom, ok := writer.ResponseWriter.(io.ReaderFrom)
+	if !ok {
+		return io.Copy(writer.ResponseWriter, source)
+	}
+
+	return readerFrom.ReadFrom(source)
+}
+
+// Unwrap exposes the underlying response writer so helpers such as
+// `http.NewResponseController` can reach transport-specific capabilities.
+func (writer *loggingResponseWriter) Unwrap() http.ResponseWriter {
+	return writer.ResponseWriter
 }
 
 // withCORS adds permissive CORS headers so the UI and external clients can call the API.
