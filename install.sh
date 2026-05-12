@@ -3,10 +3,11 @@
 set -euo pipefail
 
 REPOSITORY="${AGGR_GITHUB_REPO:-silverling/aggr}"
-INSTALL_DIR="/opt/aggr"
+SERVICE_TEMPLATE_INSTALL_DIR="/opt/aggr"
+INSTALL_DIR="${INSTALL_DIR:-${SERVICE_TEMPLATE_INSTALL_DIR}}"
 SERVICE_NAME="aggr"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-ENV_PATH="${INSTALL_DIR}/.env"
+ENV_PATH=""
 GENERATED_ACCESS_KEY=""
 
 require_root() {
@@ -21,6 +22,34 @@ require_command() {
 		echo "Missing required command: $1" >&2
 		exit 1
 	fi
+}
+
+validate_install_dir() {
+	case "${INSTALL_DIR}" in
+	"")
+		echo "INSTALL_DIR must not be empty." >&2
+		exit 1
+		;;
+	/)
+		echo "INSTALL_DIR must not be /." >&2
+		exit 1
+		;;
+	/*)
+		;;
+	*)
+		echo "INSTALL_DIR must be an absolute path. Got: ${INSTALL_DIR}" >&2
+		exit 1
+		;;
+	esac
+
+	case "${INSTALL_DIR}" in
+	*[[:space:]]*)
+		echo "INSTALL_DIR must not contain whitespace. Got: ${INSTALL_DIR}" >&2
+		exit 1
+		;;
+	esac
+
+	ENV_PATH="${INSTALL_DIR}/.env"
 }
 
 detect_platform() {
@@ -71,6 +100,20 @@ detect_nologin_shell() {
 	printf '/bin/false\n'
 }
 
+escape_sed_replacement() {
+	printf '%s\n' "$1" | sed 's/[\/&\\]/\\&/g'
+}
+
+install_service_unit() {
+	local escaped_install_dir
+	local rendered_service_path
+
+	escaped_install_dir="$(escape_sed_replacement "${INSTALL_DIR}")"
+	rendered_service_path="${TEMP_DIR}/aggr.service.rendered"
+	sed "s/\/opt\/aggr/${escaped_install_dir}/g" "${TEMP_DIR}/aggr.service" >"${rendered_service_path}"
+	install -m 0644 "${rendered_service_path}" "${SERVICE_PATH}"
+}
+
 ensure_service_account() {
 	if ! getent group aggr >/dev/null 2>&1; then
 		groupadd --system aggr
@@ -103,7 +146,7 @@ EOF
 install_files() {
 	mkdir -p "${INSTALL_DIR}"
 	install -m 0755 "${TEMP_DIR}/aggr" "${INSTALL_DIR}/aggr"
-	install -m 0644 "${TEMP_DIR}/aggr.service" "${SERVICE_PATH}"
+	install_service_unit
 	ensure_environment_file
 	chown -R aggr:aggr "${INSTALL_DIR}"
 	chmod 0750 "${INSTALL_DIR}"
@@ -142,6 +185,7 @@ main() {
 	require_command tar
 	require_command systemctl
 	require_command openssl
+	validate_install_dir
 	detect_platform
 	download_release_archive
 	ensure_service_account
