@@ -124,6 +124,7 @@ const statsError = ref('')
 const isEditing = computed(() => editingProviderId.value !== null)
 const isEditingModelAlias = computed(() => editingModelAliasId.value !== null)
 const isAuthenticated = computed(() => authState.value?.authenticated ?? false)
+const appVersion = computed(() => authState.value?.version ?? '')
 const enabledProviderOptions = computed(() => providers.value.filter((provider) => provider.enabled))
 const selectedAliasTargetProvider = computed(() => {
 	if (modelAliasForm.targetProviderId === '') {
@@ -295,6 +296,7 @@ function resetProtectedState() {
 function setLoggedOutState() {
 	authState.value = {
 		authenticated: false,
+		version: authState.value?.version ?? '',
 	}
 	resetProtectedState()
 }
@@ -948,6 +950,7 @@ onMounted(() => {
 					<p class="mt-4 max-w-[58ch] text-[1.04rem] leading-[1.65] text-ink-soft">
 						Sign in with the shared access key to manage providers, inspect traffic, and issue gateway API keys.
 					</p>
+					<p v-if="appVersion" class="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-ink-soft">Version {{ appVersion }}</p>
 				</div>
 
 				<div class="rounded-[var(--radius-card)] border border-line bg-surface-strong p-4.5">
@@ -1012,9 +1015,15 @@ onMounted(() => {
 								Store provider credentials in SQLite, discover their model catalogs, and proxy each request to the provider that actually serves
 								the requested model.
 							</p>
-							<p class="mt-3 text-sm text-ink-soft">
-								{{ authState?.session ? `Current session #${authState.session.id}` : 'Logged in and ready.' }}
-							</p>
+							<div class="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-soft">
+								<p>{{ authState?.session ? `Current session #${authState.session.id}` : 'Logged in and ready.' }}</p>
+								<span
+									v-if="appVersion"
+									class="inline-flex items-center rounded-full border border-line bg-surface-strong px-3 py-1 font-mono text-[0.78rem] font-bold text-ink-strong"
+								>
+									{{ appVersion }}
+								</span>
+							</div>
 						</div>
 
 						<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
@@ -1676,7 +1685,6 @@ onMounted(() => {
 						</div>
 					</section>
 				</div>
-
 			</div>
 		</template>
 	</div>

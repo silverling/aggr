@@ -23,6 +23,13 @@ go run ./server/cmd/aggr
 The server listens on `:8080` by default and stores data in `aggr.db`.
 Set `AGGR_ACCESS_KEY` in your `.env` file before starting the server.
 
+The binary also supports:
+
+```sh
+./aggr --help
+./aggr --version
+```
+
 ### Web UI in development
 
 Run the backend:
@@ -47,7 +54,14 @@ Use the repo build target so the embedded HTML is always regenerated before the 
 make build
 ```
 
-That runs `pnpm --dir web build` first and writes a single self-contained HTML file to `server/internal/webui/dist/index.html`, which is then embedded into the Go binary.
+That runs `pnpm --dir web build` first, writes a single self-contained HTML file to `server/internal/webui/dist/index.html`, and builds the Go binary with an embedded git-derived version string.
+
+Version formatting follows the current repository state at build time:
+
+- Exact tag build: `v1.2.3`
+- Commit after the nearest reachable tag: `v1.2.3-e10cc320`
+- No reachable tag: `e10cc320`
+- Dirty worktree: append `-dirty`
 
 If you want to run the steps manually, build the Web UI before any Go build:
 

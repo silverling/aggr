@@ -47,6 +47,8 @@ type authSessionStateResponse struct {
 	Authenticated bool `json:"authenticated"`
 	// Session contains the current browser session when authentication succeeds.
 	Session *authSessionView `json:"session,omitempty"`
+	// Version is the build-time gateway version shown by the CLI and Web UI.
+	Version string `json:"version"`
 }
 
 // authLoginPayload is the JSON body accepted by the login endpoint.
@@ -132,7 +134,7 @@ func (s *server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if session == nil {
-		writeJSON(w, http.StatusOK, authSessionStateResponse{Authenticated: false})
+		writeJSON(w, http.StatusOK, newAuthSessionStateResponse(false, nil))
 		return
 	}
 
@@ -142,10 +144,7 @@ func (s *server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view := session.toView(true)
-	writeJSON(w, http.StatusOK, authSessionStateResponse{
-		Authenticated: true,
-		Session:       &view,
-	})
+	writeJSON(w, http.StatusOK, newAuthSessionStateResponse(true, &view))
 }
 
 // handleAuthLogin verifies the shared access key, creates a browser session,
@@ -183,10 +182,17 @@ func (s *server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	s.setSessionCookie(w, r, token)
 	view := session.toView(true)
-	writeJSON(w, http.StatusOK, authSessionStateResponse{
-		Authenticated: true,
-		Session:       &view,
-	})
+	writeJSON(w, http.StatusOK, newAuthSessionStateResponse(true, &view))
+}
+
+// newAuthSessionStateResponse constructs the public session payload while
+// attaching the current build-time version string for the Web UI.
+func newAuthSessionStateResponse(authenticated bool, session *authSessionView) authSessionStateResponse {
+	return authSessionStateResponse{
+		Authenticated: authenticated,
+		Session:       session,
+		Version:       Version(),
+	}
 }
 
 // handleAuthLogout deletes the current browser session and clears the session

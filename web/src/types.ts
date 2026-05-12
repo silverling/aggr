@@ -11,6 +11,7 @@ export interface AuthSessionView {
 
 export interface AuthSessionStateResponse {
 	authenticated: boolean
+	version: string
 	session?: AuthSessionView
 }
 

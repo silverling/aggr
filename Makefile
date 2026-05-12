@@ -1,9 +1,12 @@
 .PHONY: build go-build test dev web-dev web-build fmt tidy
 
+VERSION ?= $(shell ./scripts/build-version.sh)
+GO_LDFLAGS := -X github.com/silverling/aggr/server.buildVersion=$(VERSION)
+
 build: go-build
 
 go-build: web-build
-	go build ./server/cmd/aggr
+	go build -ldflags "$(GO_LDFLAGS)" ./server/cmd/aggr
 
 test: web-build
 	go test ./...
@@ -11,7 +14,7 @@ test: web-build
 dev:
 	@trap 'kill 0' INT TERM EXIT; \
 	pnpm --dir web dev & \
-	AGGR_ENV=dev go run ./server/cmd/aggr
+	AGGR_ENV=dev go run -ldflags "$(GO_LDFLAGS)" ./server/cmd/aggr
 
 web-dev:
 	pnpm --dir web dev

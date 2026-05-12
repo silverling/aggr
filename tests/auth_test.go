@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"testing"
+
+	gatewayserver "github.com/silverling/aggr/server"
 )
 
 // testAuthSessionStateResponse mirrors the login and session-status payloads
@@ -13,6 +15,8 @@ type testAuthSessionStateResponse struct {
 	Authenticated bool `json:"authenticated"`
 	// Session contains the current browser session when authentication succeeds.
 	Session *testAuthSessionView `json:"session,omitempty"`
+	// Version is the build-time gateway version surfaced to the Web UI.
+	Version string `json:"version"`
 }
 
 // testAuthSessionView mirrors one browser session returned by the gateway.
@@ -84,6 +88,15 @@ func TestAccessKeySessionAndGatewayAPIKeyAccess(t *testing.T) {
 	doJSONRequest(t, anonymousClient, http.MethodGet, gatewayURL+"/api/providers", "", http.StatusUnauthorized, nil)
 	doJSONRequest(t, anonymousClient, http.MethodGet, gatewayURL+"/v1/models", "", http.StatusUnauthorized, nil)
 
+	var anonymousSessionPayload testAuthSessionStateResponse
+	doJSONRequest(t, anonymousClient, http.MethodGet, gatewayURL+"/api/auth/session", "", http.StatusOK, &anonymousSessionPayload)
+	if anonymousSessionPayload.Authenticated {
+		t.Fatalf("anonymous session payload = %#v, want logged out state", anonymousSessionPayload)
+	}
+	if anonymousSessionPayload.Version != gatewayserver.Version() {
+		t.Fatalf("anonymous session version = %q, want %q", anonymousSessionPayload.Version, gatewayserver.Version())
+	}
+
 	loginClient := newCookieClient(t)
 	var loginPayload testAuthSessionStateResponse
 	doJSONRequest(
@@ -98,11 +111,17 @@ func TestAccessKeySessionAndGatewayAPIKeyAccess(t *testing.T) {
 	if !loginPayload.Authenticated || loginPayload.Session == nil || !loginPayload.Session.Current {
 		t.Fatalf("login payload = %#v, want authenticated current session", loginPayload)
 	}
+	if loginPayload.Version != gatewayserver.Version() {
+		t.Fatalf("login payload version = %q, want %q", loginPayload.Version, gatewayserver.Version())
+	}
 
 	var sessionPayload testAuthSessionStateResponse
 	doJSONRequest(t, loginClient, http.MethodGet, gatewayURL+"/api/auth/session", "", http.StatusOK, &sessionPayload)
 	if !sessionPayload.Authenticated || sessionPayload.Session == nil || !sessionPayload.Session.Current {
 		t.Fatalf("session payload = %#v, want authenticated current session", sessionPayload)
+	}
+	if sessionPayload.Version != gatewayserver.Version() {
+		t.Fatalf("session payload version = %q, want %q", sessionPayload.Version, gatewayserver.Version())
 	}
 
 	apiKey := createTestGatewayAPIKey(t, loginClient, gatewayURL, "Auth test key")

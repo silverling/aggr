@@ -616,6 +616,7 @@ func Run() error {
 		"addr", cfg.Addr,
 		"db", cfg.DatabasePath,
 		"environment", cfg.Environment,
+		"version", Version(),
 	)
 
 	// Start the listener in a background goroutine so the main run loop can
