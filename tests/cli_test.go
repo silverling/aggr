@@ -31,6 +31,12 @@ func TestCLIHelpFlag(t *testing.T) {
 	if !strings.Contains(output, "--version") {
 		t.Fatalf("stdout = %q, want version flag description", output)
 	}
+	if !strings.Contains(output, "AGGR_ACCESS_KEY") {
+		t.Fatalf("stdout = %q, want environment variable guidance", output)
+	}
+	if !strings.Contains(output, ".env file") {
+		t.Fatalf("stdout = %q, want .env guidance", output)
+	}
 }
 
 // TestCLIVersionFlag verifies that the gateway prints the current build-time

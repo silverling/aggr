@@ -57,7 +57,7 @@ func writeCLIUsage(writer io.Writer) {
 
 	_, _ = fmt.Fprintf(
 		writer,
-		"Usage: aggr [--help] [--version]\n\nOptions:\n  --help     Show usage and exit.\n  --version  Show version and exit.\n",
+		"Usage: aggr [--help] [--version]\n\nOptions:\n  --help     Show usage and exit.\n  --version  Show version and exit.\n\nEnvironment:\n  AGGR_ACCESS_KEY  Shared access key required for Web UI and /api access.\n  AGGR_ADDR        HTTP listen address. Default: :8080\n  AGGR_DB_PATH     SQLite database path. Default: aggr.db\n  AGGR_ENV         Runtime environment label. Default: prod\n\nConfiguration:\n  Environment variables can be set in the shell or in a local .env file.\n  Example:\n    AGGR_ACCESS_KEY=change-me\n    AGGR_ADDR=:8080\n    AGGR_DB_PATH=aggr.db\n",
 	)
 }
 
