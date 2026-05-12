@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"sort"
 	"strings"
 	"time"
@@ -2099,7 +2100,7 @@ func applyRequestLogOutcome(succeeded *int64, failed *int64, log proxyRequestLog
 // applyRequestLogUsage adds the parsed token usage from one audited response to
 // the provided running totals.
 func applyRequestLogUsage(consumedTokens *int64, cachedInputTokens *int64, nonCachedInputTokens *int64, outputTokens *int64, log proxyRequestLogRecord) {
-	usage, ok := extractRequestTokenUsage(log.ResponseBody)
+	usage, ok := extractRequestTokenUsage(log.ResponseHeaders, log.ResponseBody)
 	if !ok {
 		return
 	}
@@ -2110,9 +2111,20 @@ func applyRequestLogUsage(consumedTokens *int64, cachedInputTokens *int64, nonCa
 	*outputTokens += usage.OutputTokens
 }
 
-// extractRequestTokenUsage parses an OpenAI-style response body and returns the
-// token counts needed by the stats dashboard.
-func extractRequestTokenUsage(body string) (requestTokenUsage, bool) {
+// extractRequestTokenUsage parses one audited response body using the persisted
+// response content type to decide whether the payload should be interpreted as
+// plain JSON or as an SSE event stream.
+func extractRequestTokenUsage(responseHeaders string, body string) (requestTokenUsage, bool) {
+	if isEventStreamResponse(responseHeaders) {
+		return extractEventStreamRequestTokenUsage(body)
+	}
+
+	return extractJSONRequestTokenUsage(body)
+}
+
+// extractJSONRequestTokenUsage parses one OpenAI-style JSON response body and
+// returns the token counts needed by the stats dashboard.
+func extractJSONRequestTokenUsage(body string) (requestTokenUsage, bool) {
 	if strings.TrimSpace(body) == "" || !json.Valid([]byte(body)) {
 		return requestTokenUsage{}, false
 	}
@@ -2155,6 +2167,109 @@ func extractRequestTokenUsage(body string) (requestTokenUsage, bool) {
 		NonCachedInputTokens: inputTokens - cachedInputTokens,
 		OutputTokens:         outputTokens,
 	}, true
+}
+
+// extractEventStreamRequestTokenUsage scans one SSE response body and returns
+// the last usage-bearing JSON chunk that appeared before the terminal `[DONE]`
+// event.
+func extractEventStreamRequestTokenUsage(body string) (requestTokenUsage, bool) {
+	if strings.TrimSpace(body) == "" {
+		return requestTokenUsage{}, false
+	}
+
+	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	var lastUsage requestTokenUsage
+	found := false
+	for _, rawEvent := range strings.Split(normalized, "\n\n") {
+		data, ok := extractSSEEventData(rawEvent)
+		if !ok {
+			continue
+		}
+
+		if strings.TrimSpace(data) == "[DONE]" {
+			continue
+		}
+
+		usage, ok := extractJSONRequestTokenUsage(data)
+		if !ok {
+			continue
+		}
+
+		lastUsage = usage
+		found = true
+	}
+
+	return lastUsage, found
+}
+
+// extractSSEEventData joins all `data:` lines from one SSE event block into the
+// JSON payload seen by the client.
+func extractSSEEventData(event string) (string, bool) {
+	if strings.TrimSpace(event) == "" {
+		return "", false
+	}
+
+	lines := strings.Split(event, "\n")
+	dataLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		value := strings.TrimPrefix(line, "data:")
+		value = strings.TrimPrefix(value, " ")
+		dataLines = append(dataLines, value)
+	}
+
+	if len(dataLines) == 0 {
+		return "", false
+	}
+
+	return strings.Join(dataLines, "\n"), true
+}
+
+// isEventStreamResponse reports whether the audited response headers identify
+// the body as an SSE stream.
+func isEventStreamResponse(responseHeaders string) bool {
+	return responseContentType(responseHeaders) == "text/event-stream"
+}
+
+// responseContentType extracts the normalized media type from the persisted
+// response headers JSON so downstream parsers can choose the correct body
+// format.
+func responseContentType(responseHeaders string) string {
+	if strings.TrimSpace(responseHeaders) == "" {
+		return ""
+	}
+
+	var headers map[string][]string
+	if err := json.Unmarshal([]byte(responseHeaders), &headers); err != nil {
+		return ""
+	}
+
+	for key, values := range headers {
+		if !strings.EqualFold(key, "Content-Type") {
+			continue
+		}
+
+		for _, value := range values {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
+				continue
+			}
+
+			mediaType, _, err := mime.ParseMediaType(trimmed)
+			if err == nil {
+				return strings.ToLower(mediaType)
+			}
+
+			return strings.ToLower(strings.TrimSpace(strings.Split(trimmed, ";")[0]))
+		}
+	}
+
+	return ""
 }
 
 // usageMap returns the top-level usage object for plain JSON responses and the
