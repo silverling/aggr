@@ -45,9 +45,46 @@ jobs:
           ./scripts/package-release.sh linux amd64
           ./scripts/package-release.sh linux arm64
 
+      - name: Collect release contributors from pull requests
+        id: contributors
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREVIOUS_TAG="$(git tag --sort=-creatordate | grep -vx "${GITHUB_REF_NAME}" | head -n 1 || true)"
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            RANGE="${PREVIOUS_TAG}..${GITHUB_SHA}"
+          else
+            RANGE="${GITHUB_SHA}"
+          fi
+
+          CONTRIBUTOR_FILE="$(mktemp)"
+          COMMITS="$(git log --no-merges --format='%H' "${RANGE}")"
+
+          for commit_sha in ${COMMITS}; do
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${GITHUB_REPOSITORY}/commits/${commit_sha}/pulls" \
+              --jq '.[].user.login' >>"${CONTRIBUTOR_FILE}" || true
+          done
+
+          sort -u -o "${CONTRIBUTOR_FILE}" "${CONTRIBUTOR_FILE}"
+          {
+            echo "previous_tag=${PREVIOUS_TAG}"
+            echo "contributors_file=${CONTRIBUTOR_FILE}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Generate release notes
+        id: changelog
+        run: |
+          NOTES_FILE="$(./scripts/generate-changelog.sh "${GITHUB_REF_NAME}" "${{ steps.contributors.outputs.previous_tag }}" "${GITHUB_SHA}" "${{ steps.contributors.outputs.contributors_file }}")"
+          {
+            echo "notes_file=${NOTES_FILE}"
+          } >>"${GITHUB_OUTPUT}"
+
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
+          body_path: ${{ steps.changelog.outputs.notes_file }}
           files: |
             dist/aggr-linux-amd64.tar.gz
             dist/aggr-linux-arm64.tar.gz

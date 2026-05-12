@@ -112,6 +112,11 @@ sudo systemctl restart aggr
 Set `AGGR_GITHUB_REPO=owner/repo` first if the binary should upgrade from a
 different GitHub repository.
 
+## Changelog
+
+Release notes are generated from commit messages between tags in the release
+workflow and published as the GitHub Release body.
+
 ## Environment variables
 
 - `AGGR_ADDR`: server listen address, default `:8080`
