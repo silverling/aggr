@@ -26,13 +26,20 @@ That downloads the latest GitHub release, installs `aggr` to `/opt/aggr`,
 installs the systemd unit, generates `AGGR_ACCESS_KEY` with
 `openssl rand -hex 32` when needed, and starts the service.
 
+To install into a different absolute path, set `INSTALL_DIR` before running
+the installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/silverling/aggr/main/install.sh | sudo INSTALL_DIR=/srv/aggr bash
+```
+
 To install from a fork instead, set `AGGR_GITHUB_REPO=owner/repo` before
 running the installer.
 
 After install:
 
 - The systemd service is `aggr`
-- The environment file is `/opt/aggr/.env`
+- The environment file is `INSTALL_DIR/.env`, default `/opt/aggr/.env`
 - The generated access key is printed once by the installer
 - Check status with `sudo systemctl status aggr`
 
