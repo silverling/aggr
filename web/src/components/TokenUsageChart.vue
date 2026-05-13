@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatCompactNumber } from '../lib/utils'
 import type { RequestStatsBucket } from '../types'
 import { computed } from 'vue'
 
@@ -8,11 +9,6 @@ const props = defineProps<{
 	buckets: RequestStatsBucket[]
 	bucketLabelKind: 'day' | 'hour'
 }>()
-
-const compactNumberFormatter = new Intl.NumberFormat(undefined, {
-	maximumFractionDigits: 0,
-	notation: 'compact',
-})
 
 const dailyLabelFormatter = new Intl.DateTimeFormat(undefined, {
 	month: 'short',
@@ -43,10 +39,6 @@ function bucketStart(bucket: RequestStatsBucket) {
 	}
 
 	return parsed
-}
-
-function formatCompactNumber(value: number) {
-	return compactNumberFormatter.format(value)
 }
 
 function segmentHeight(tokens: number) {
@@ -148,7 +140,7 @@ function bucketTitle(bucket: RequestStatsBucket) {
 				</div>
 				<div class="grid gap-1 text-center">
 					<span class="font-mono text-[0.8rem] font-bold text-ink-strong">{{ bucketLabel(bucket) }}</span>
-					<span class="text-[0.76rem] text-ink-soft">{{ bucket.requests }} req</span>
+					<span class="text-[9px] text-ink-soft">{{ formatCompactNumber(bucket.requests) }} Req</span>
 				</div>
 			</div>
 		</div>

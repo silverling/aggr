@@ -1132,13 +1132,13 @@ onBeforeUnmount(() => {
 											class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 											type="text"
 											autocomplete="off"
-											placeholder="Production client"
+											placeholder="Some Client"
 											required
 										/>
 									</label>
 
 									<button
-										class="inline-flex items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
+										class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
 										type="submit"
 										:disabled="creatingApiKey"
 									>
@@ -1414,7 +1414,10 @@ onBeforeUnmount(() => {
 								</div>
 							</article>
 
-							<article data-anchor="model-disable-rule-active" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+							<article
+								data-anchor="model-disable-rule-active"
+								class="flex flex-col gap-4 rounded-card border border-line bg-surface-strong p-4.5"
+							>
 								<div>
 									<h3>Current rules</h3>
 									<p class="mt-1.5 leading-[1.6] text-ink-soft">
@@ -1531,7 +1534,7 @@ onBeforeUnmount(() => {
 								</form>
 							</article>
 
-							<article data-anchor="model-alias-list" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+							<article data-anchor="model-alias-list" class="flex flex-col gap-4 rounded-card border border-line bg-surface-strong p-4.5">
 								<div>
 									<h3>Configured aliases</h3>
 									<p class="mt-1.5 leading-[1.6] text-ink-soft">
@@ -1692,7 +1695,7 @@ onBeforeUnmount(() => {
 						</div>
 
 						<div v-else class="relative">
-							<div ref="requestLogList" class="grid max-h-160 gap-2 overflow-y-auto pb-8 pr-1 pt-1" @scroll="syncRequestLogScrollCue">
+							<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto pb-8 pr-1 pt-1" @scroll="syncRequestLogScrollCue">
 								<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
 							</div>
 							<div
