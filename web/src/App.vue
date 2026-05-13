@@ -1173,7 +1173,7 @@ onBeforeUnmount(() => {
 					<span class="text-[0.92rem] font-bold text-ink-strong">Access key</span>
 					<input
 						v-model.trim="accessKeyForm.accessKey"
-						class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+						class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 						type="password"
 						autocomplete="current-password"
 						placeholder="Enter the shared access key"
@@ -1269,7 +1269,7 @@ onBeforeUnmount(() => {
 										<span class="text-[0.92rem] font-bold text-ink-strong">Key name</span>
 										<input
 											v-model.trim="apiKeyForm.name"
-											class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 											type="text"
 											autocomplete="off"
 											placeholder="Some Client"
@@ -1366,7 +1366,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">Display name</span>
 									<input
 										v-model.trim="form.name"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										type="text"
 										autocomplete="off"
 										placeholder="OpenAI primary"
@@ -1378,7 +1378,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">Base URL</span>
 									<input
 										v-model.trim="form.baseUrl"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										type="url"
 										autocomplete="off"
 										placeholder="https://api.openai.com/v1"
@@ -1391,7 +1391,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">API key</span>
 									<input
 										v-model.trim="form.apiKey"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										type="password"
 										:placeholder="isEditing ? 'Leave blank to keep the current key' : 'sk-...'"
 										:required="!isEditing"
@@ -1402,7 +1402,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">User agent</span>
 									<input
 										v-model.trim="form.userAgent"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										type="text"
 										autocomplete="off"
 										placeholder="Aggr/1.0"
@@ -1410,7 +1410,7 @@ onBeforeUnmount(() => {
 									<small class="text-ink-soft">Leave blank to use the SDK default upstream user agent.</small>
 								</label>
 
-								<label class="flex items-center justify-start gap-3 rounded-(--radius-field) border border-line bg-surface-muted px-4 py-3.5">
+								<label class="flex items-center justify-start gap-3 rounded-field border border-line px-4 py-3.5">
 									<input v-model="form.enabled" class="h-4.5 w-4.5 accent-accent" type="checkbox" />
 									<span class="font-bold text-ink-strong">Enabled for model routing</span>
 								</label>
@@ -1430,7 +1430,7 @@ onBeforeUnmount(() => {
 							</div>
 
 							<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface-strong p-4.5">
-								<span class="text-[0.82rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Gateway base</span>
+								<span class="text-[0.82rem] font-bold uppercase tracking-widest text-accent-strong">Gateway base</span>
 								<code class="wrap-break-word text-ink-strong">{{ gatewayBase }}</code>
 								<button class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="copyGatewayBase">
 									<Copy class="size-5" />
@@ -1586,7 +1586,7 @@ onBeforeUnmount(() => {
 										<span class="text-[0.92rem] font-bold text-ink-strong">Alias model name</span>
 										<input
 											v-model.trim="modelAliasForm.aliasModelId"
-											class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 											type="text"
 											autocomplete="off"
 											placeholder="team-gateway"
@@ -1598,7 +1598,7 @@ onBeforeUnmount(() => {
 										<span class="text-[0.92rem] font-bold text-ink-strong">Target model</span>
 										<input
 											v-model.trim="modelAliasForm.targetModelId"
-											class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 											list="model-alias-target-models"
 											type="text"
 											autocomplete="off"
@@ -1614,7 +1614,7 @@ onBeforeUnmount(() => {
 										<span class="text-[0.92rem] font-bold text-ink-strong">Target provider (optional)</span>
 										<select
 											v-model="modelAliasForm.targetProviderId"
-											class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+											class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										>
 											<option value="">Any enabled provider</option>
 											<option v-for="provider in aliasTargetProviderOptions" :key="provider.id" :value="String(provider.id)">
@@ -1737,7 +1737,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">Provider</span>
 									<select
 										v-model="clearRequestLogsForm.providerId"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 									>
 										<option value="">All providers</option>
 										<option v-for="provider in providers" :key="provider.id" :value="String(provider.id)">
@@ -1750,7 +1750,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">From</span>
 									<input
 										v-model="clearRequestLogsForm.from"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										type="datetime-local"
 										step="60"
 									/>
@@ -1760,7 +1760,7 @@ onBeforeUnmount(() => {
 									<span class="text-[0.92rem] font-bold text-ink-strong">To</span>
 									<input
 										v-model="clearRequestLogsForm.to"
-										class="w-full rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+										class="w-full rounded-field border border-line-strong bg-white/90 px-4 py-3.75 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 										type="datetime-local"
 										step="60"
 									/>

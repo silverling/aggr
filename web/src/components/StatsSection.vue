@@ -32,7 +32,7 @@ function onRangeChange(event: Event) {
 						<select
 							data-anchor="stats-range"
 							:value="props.range"
-							class="min-w-50 rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-2 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
+							class="min-w-50 rounded-field border border-line-strong bg-white/90 px-4 py-2 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
 							@change="onRangeChange"
 						>
 							<option v-for="option in props.rangeOptions" :key="option.value" :value="option.value">

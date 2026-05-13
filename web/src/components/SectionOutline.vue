@@ -108,7 +108,7 @@ watch(
 		<div
 			class="sticky top-6 w-55 rounded-3xl border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]"
 		>
-			<p class="px-2.5 pb-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Outline</p>
+			<p class="px-2.5 pb-2 text-[0.72rem] font-bold uppercase tracking-widest text-accent-strong">Outline</p>
 			<nav class="grid gap-1.5">
 				<button
 					v-for="item in props.items"

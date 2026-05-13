@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { GatewayApiKeyView } from '../types'
+import { Key, Clock, ClockCheck } from '@lucide/vue'
 import { computed } from 'vue'
 
 const props = defineProps<{
@@ -32,11 +33,15 @@ function formatTimestamp(value: string) {
 </script>
 
 <template>
-	<article data-anchor="api-key-card" class="grid gap-3.5 rounded-card border border-line bg-surface-strong p-4.5">
-		<div class="flex items-start justify-between gap-3">
-			<div>
+	<article data-anchor="api-key-card" class="grid grid-cols-[1fr_auto] gap-3.5 rounded-card border border-line bg-surface-strong p-4.5">
+		<div class="flex items-center justify-between gap-3 col-span-2">
+			<div class="flex items-baseline gap-2">
 				<h3>{{ props.apiKey.name }}</h3>
-				<p class="mt-1.5 leading-[1.6] text-ink-soft">Prefix: {{ props.apiKey.keyPrefix }}</p>
+				<code
+					class="mt-1.5 text-[0.76rem] leading-[1.6] text-ink-soft inline-flex items-center gap-1 bg-white/70 border rounded-full px-2.5 py-1 border-line"
+				>
+					<Key class="size-3" /> {{ props.apiKey.keyPrefix }}****
+				</code>
 			</div>
 			<span
 				:class="['inline-flex items-center rounded-full px-2.5 py-1 font-mono text-[0.76rem] font-bold uppercase tracking-widest', usageClass]"
@@ -45,14 +50,22 @@ function formatTimestamp(value: string) {
 			</span>
 		</div>
 
-		<div class="flex flex-wrap gap-x-3 gap-y-1.5 text-sm text-ink-soft">
-			<span>Created {{ formatTimestamp(props.apiKey.createdAt) }}</span>
-			<span v-if="props.apiKey.lastUsedAt">Last used {{ formatTimestamp(props.apiKey.lastUsedAt) }}</span>
+		<div class="flex flex-wrap gap-x-3 text-sm text-ink-soft col-span-1 font-mono">
+			<span class="inline-flex gap-2 items-center">
+				<Clock class="size-3.5" />
+				<span class="min-w-22">Created at</span>
+				<span>{{ formatTimestamp(props.apiKey.createdAt) }}</span>
+			</span>
+			<span v-if="props.apiKey.lastUsedAt" class="inline-flex gap-2 items-center">
+				<ClockCheck class="size-3.5" />
+				<span class="min-w-22">Last used at</span>
+				<span>{{ formatTimestamp(props.apiKey.lastUsedAt) }}</span>
+			</span>
 		</div>
 
-		<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
+		<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch col-span-1">
 			<button class="btn-danger" type="button" :disabled="props.deleting" @click="emit('delete')">
-				{{ props.deleting ? 'Revoking…' : 'Revoke API key' }}
+				{{ props.deleting ? 'Revoking…' : 'Revoke' }}
 			</button>
 		</div>
 	</article>
