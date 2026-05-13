@@ -110,7 +110,12 @@ func downloadReleaseBinary(currentExecutablePath, archiveURL string) (string, er
 		}
 	}()
 
-	httpClient := &http.Client{Timeout: 2 * time.Minute}
+	httpClient := &http.Client{
+		Timeout: 2 * time.Minute,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		},
+	}
 	response, err := httpClient.Get(archiveURL)
 	if err != nil {
 		return "", fmt.Errorf("download release archive: %w", err)
