@@ -30,7 +30,7 @@ function formatTimestamp(value: string) {
 	<article
 		data-anchor="model-alias-card"
 		:class="[
-			'grid gap-3.5 rounded-card border bg-surface-strong p-4.5',
+			'flex flex-col gap-3.5 rounded-card border bg-surface-strong p-4.5',
 			props.editing ? 'border-[rgba(12,118,98,0.3)] shadow-[0_14px_34px_rgba(12,118,98,0.08)]' : 'border-line',
 		]"
 	>

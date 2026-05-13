@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { formatDuration } from '../lib/utils'
 import type { ProxyRequestLogView } from '../types'
-import { Package, Building2, Clock, ClockArrowUp, ClockCheck } from '@lucide/vue'
+import { Package, Building2, Clock, ClockArrowUp } from '@lucide/vue'
 import { computed } from 'vue'
 
 const props = defineProps<{
@@ -180,28 +181,28 @@ function formatHeaders(value?: string) {
 	>
 		<summary class="list-none cursor-pointer transition duration-150 ease-out">
 			<div class="flex flex-wrap items-start justify-between gap-3">
-				<div class="grid gap-16 grid-cols-[auto_1fr]">
+				<div class="grid gap-8 grid-cols-[auto_1fr]">
 					<div class="flex flex-wrap items-center gap-2.5">
 						<span
 							class="inline-flex items-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-3 py-1.5 font-mono text-[0.78rem] font-bold uppercase tracking-[0.18em] text-ink-strong transition duration-150 ease-out group-hover:border-[rgba(12,118,98,0.2)] group-hover:bg-white"
 						>
 							{{ props.requestLog.receivedRequest.method }}
 						</span>
-						<code class="wrap-break-word text-[0.92rem] text-ink-strong transition duration-150 ease-out group-hover:text-accent">{{
-							formatPath(props.requestLog.receivedRequest.path, props.requestLog.receivedRequest.rawQuery)
-						}}</code>
+						<code class="wrap-break-word text-[0.92rem] text-ink-strong transition duration-150 ease-out group-hover:text-accent min-w-38">
+							{{ formatPath(props.requestLog.receivedRequest.path, props.requestLog.receivedRequest.rawQuery) }}
+						</code>
 					</div>
 
 					<div
 						class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-ink-soft [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1 font-mono"
 					>
 						<span><ClockArrowUp class="inline size-4" /> {{ formatTimestamp(props.requestLog.requestedAt) }}</span>
-						<span v-if="props.requestLog.completedAt">
-							<ClockCheck class="inline size-4" /> {{ formatTimestamp(props.requestLog.completedAt) }}
-						</span>
-						<span v-if="props.requestLog.durationMs !== undefined"><Clock class="inline size-4" />{{ props.requestLog.durationMs }} ms</span>
 						<span v-if="props.requestLog.providerName"><Building2 class="inline size-4" /> {{ props.requestLog.providerName }}</span>
 						<span v-if="props.requestLog.modelId"><Package class="inline size-4" /> {{ props.requestLog.modelId }}</span>
+						<span v-if="props.requestLog.durationMs !== undefined">
+							<Clock class="inline size-4" />
+							{{ formatDuration(props.requestLog.durationMs) }}
+						</span>
 					</div>
 				</div>
 
@@ -221,10 +222,10 @@ function formatHeaders(value?: string) {
 				{{ props.requestLog.receivedResponse.error }}
 			</p>
 
-			<div class="grid gap-4 xl:grid-cols-3">
+			<div class="grid xl:grid-cols-3">
 				<section
 					data-anchor="request-log-received-request"
-					class="grid h-136 gap-3 overflow-y-auto rounded-[18px] border border-line bg-surface p-4"
+					class="flex flex-col h-180 gap-3 overflow-y-auto border-r border-line bg-surface p-4"
 				>
 					<div>
 						<h3 class="mb-1 text-xs font-bold uppercase tracking-widest text-accent">Received request</h3>
@@ -250,10 +251,7 @@ function formatHeaders(value?: string) {
 					</div>
 				</section>
 
-				<section
-					data-anchor="request-log-sent-request"
-					class="grid h-136 gap-3 overflow-y-auto rounded-[18px] border border-line bg-surface p-4"
-				>
+				<section data-anchor="request-log-sent-request" class="flex flex-col h-180 gap-3 overflow-y-auto border-r border-line bg-surface p-4">
 					<div>
 						<h3 class="mb-1 text-xs font-bold uppercase tracking-widest text-accent">Sent request</h3>
 					</div>
@@ -282,10 +280,7 @@ function formatHeaders(value?: string) {
 					</p>
 				</section>
 
-				<section
-					data-anchor="request-log-received-response"
-					class="grid h-136 gap-3 overflow-y-auto rounded-[18px] border border-line bg-surface p-4"
-				>
+				<section data-anchor="request-log-received-response" class="flex flex-col h-180 gap-3 overflow-y-auto bg-surface p-4">
 					<div>
 						<h3 class="mb-1 text-xs font-bold uppercase tracking-widest text-accent">Response</h3>
 					</div>
