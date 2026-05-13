@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/silverling/aggr/server"
@@ -371,6 +372,66 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
 	if len(logsPayload.Requests) != 0 {
 		t.Fatalf("expected 0 request logs after date delete, got %d", len(logsPayload.Requests))
+	}
+}
+
+// TestRequestLogListIncludesUnfinishedRequests verifies that the admin request
+// log API can list audit rows whose response metadata is still NULL because the
+// proxied request has not finished yet.
+func TestRequestLogListIncludesUnfinishedRequests(t *testing.T) {
+	t.Parallel()
+
+	gatewayURL, client, db := newTestGatewayServerWithDatabase(t)
+	requestedAt := time.Now().UTC().Add(-time.Minute)
+
+	if _, err := db.Exec(`
+		INSERT INTO proxy_request_logs (
+			provider_id, provider_name, model_id, method, path, raw_query,
+			request_headers, request_body, request_body_truncated, requested_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		nil,
+		"",
+		"gpt-4.1",
+		http.MethodPost,
+		"/v1/chat/completions",
+		"",
+		`{"content-type":"application/json"}`,
+		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,
+		0,
+		requestedAt.Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("insert unfinished proxy request log: %v", err)
+	}
+
+	var logsPayload testProxyRequestsResponse
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+
+	if len(logsPayload.Requests) != 1 {
+		t.Fatalf("expected 1 unfinished request log, got %d", len(logsPayload.Requests))
+	}
+
+	log := logsPayload.Requests[0]
+	if log.ReceivedRequest.Path != "/v1/chat/completions" {
+		t.Fatalf("unfinished request path = %q, want %q", log.ReceivedRequest.Path, "/v1/chat/completions")
+	}
+	if log.ModelID != "gpt-4.1" {
+		t.Fatalf("unfinished request model = %q, want %q", log.ModelID, "gpt-4.1")
+	}
+	if log.SentRequest != nil {
+		t.Fatalf("unfinished sent request = %#v, want nil", log.SentRequest)
+	}
+	if log.ReceivedResponse.Headers != "" {
+		t.Fatalf("unfinished response headers = %q, want empty string", log.ReceivedResponse.Headers)
+	}
+	if log.ReceivedResponse.Body != "" {
+		t.Fatalf("unfinished response body = %q, want empty string", log.ReceivedResponse.Body)
+	}
+	if log.ReceivedResponse.Error != "" {
+		t.Fatalf("unfinished response error = %q, want empty string", log.ReceivedResponse.Error)
+	}
+	if log.ReceivedResponse.BodyTruncated {
+		t.Fatalf("unfinished response body truncated = %t, want false", log.ReceivedResponse.BodyTruncated)
 	}
 }
 

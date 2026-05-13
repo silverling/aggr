@@ -70,6 +70,7 @@ const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
 const pendingModelDisableRules = ref<PendingModelDisableRule[]>([])
 const requestLogLimit = 40
+const liveRefreshIntervalMs = 5000
 const statsRange = ref('24h')
 const statsRangeOptions: StatsRangeOption[] = [
 	{ value: '1h', label: 'In an hour' },
@@ -194,6 +195,21 @@ const curlExample = computed(() =>
 	].join('\n'),
 )
 
+type LoadStatsOptions = {
+	background?: boolean
+}
+
+type LoadRequestLogsOptions = {
+	preserveScroll?: boolean
+	suppressErrors?: boolean
+}
+
+type RequestLogScrollSnapshot = {
+	scrollHeight: number
+	scrollTop: number
+	pinnedToTop: boolean
+}
+
 function setNotice(tone: NoticeTone, text: string) {
 	if (tone === 'success') {
 		toast.success(text)
@@ -279,6 +295,8 @@ function resetGeneratedApiKey() {
 }
 
 function resetProtectedState() {
+	statsRequestVersion += 1
+	requestLogsRequestVersion += 1
 	providers.value = []
 	models.value = []
 	modelAliases.value = []
@@ -404,23 +422,21 @@ async function loadDashboard(showNotice = false) {
 	clearNotice()
 
 	try {
-		const [providerPayload, modelPayload, aliasPayload, requestPayload, sessionsPayload, apiKeysPayload] = await Promise.all([
+		const [providerPayload, modelPayload, aliasPayload, sessionsPayload, apiKeysPayload] = await Promise.all([
 			request<ProvidersPayload>('/api/providers'),
 			request<ModelsPayload>('/api/models'),
 			request<ModelAliasesPayload>('/api/model-aliases'),
-			request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`),
 			request<AuthSessionsPayload>('/api/auth/sessions'),
 			request<GatewayApiKeysPayload>('/api/auth/api-keys'),
 		])
 		providers.value = providerPayload.providers
 		models.value = modelPayload.models
 		modelAliases.value = aliasPayload.aliases
-		requestLogs.value = requestPayload.requests
 		sessions.value = sessionsPayload.sessions
 		apiKeys.value = apiKeysPayload.apiKeys
 		reconcilePendingModelDisableRules()
 		reconcileEditingModelAlias()
-		await loadStats()
+		await Promise.all([loadRequestLogs({ preserveScroll: true }), loadStats({ background: stats.value !== null })])
 
 		if (showNotice) {
 			setNotice('info', 'Dashboard refreshed.')
@@ -545,17 +561,24 @@ async function revokeSession(session: AuthSessionView) {
 }
 
 let statsRequestVersion = 0
+let requestLogsRequestVersion = 0
+let liveRefreshTimer: number | null = null
+let liveRefreshInFlight = false
 
-async function loadStats() {
+async function loadStats(options: LoadStatsOptions = {}) {
 	if (!isAuthenticated.value) {
 		stats.value = null
+		statsError.value = ''
 		statsLoading.value = false
 		return
 	}
 
 	const requestVersion = ++statsRequestVersion
-	statsLoading.value = true
-	statsError.value = ''
+	const showLoading = !options.background || stats.value === null
+	if (showLoading) {
+		statsLoading.value = true
+		statsError.value = ''
+	}
 
 	try {
 		const params = new URLSearchParams({
@@ -567,6 +590,7 @@ async function loadStats() {
 			return
 		}
 		stats.value = payload
+		statsError.value = ''
 	} catch (error) {
 		if (requestVersion !== statsRequestVersion) {
 			return
@@ -578,10 +602,94 @@ async function loadStats() {
 		}
 		statsError.value = error instanceof Error ? error.message : 'Failed to load stats.'
 	} finally {
-		if (requestVersion === statsRequestVersion) {
+		if (showLoading && requestVersion === statsRequestVersion) {
 			statsLoading.value = false
 		}
 	}
+}
+
+function captureRequestLogScrollSnapshot(): RequestLogScrollSnapshot | null {
+	const element = requestLogList.value
+	if (element === null) {
+		return null
+	}
+
+	return {
+		scrollHeight: element.scrollHeight,
+		scrollTop: element.scrollTop,
+		pinnedToTop: element.scrollTop <= 16,
+	}
+}
+
+function restoreRequestLogScrollSnapshot(snapshot: RequestLogScrollSnapshot | null) {
+	if (snapshot === null) {
+		return
+	}
+
+	void nextTick(() => {
+		const element = requestLogList.value
+		if (element === null || snapshot.pinnedToTop) {
+			return
+		}
+
+		const heightDelta = element.scrollHeight - snapshot.scrollHeight
+		element.scrollTop = Math.max(0, snapshot.scrollTop + heightDelta)
+		syncRequestLogScrollCue()
+	})
+}
+
+async function loadRequestLogs(options: LoadRequestLogsOptions = {}) {
+	if (!isAuthenticated.value) {
+		requestLogs.value = []
+		return
+	}
+
+	const requestVersion = ++requestLogsRequestVersion
+	const scrollSnapshot = options.preserveScroll ? captureRequestLogScrollSnapshot() : null
+
+	try {
+		const payload = await request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`)
+		if (requestVersion !== requestLogsRequestVersion) {
+			return
+		}
+
+		requestLogs.value = payload.requests
+		restoreRequestLogScrollSnapshot(scrollSnapshot)
+	} catch (error) {
+		if (requestVersion !== requestLogsRequestVersion) {
+			return
+		}
+		if (handleAuthError(error) || options.suppressErrors) {
+			return
+		}
+
+		throw error
+	}
+}
+
+async function refreshLivePanels() {
+	if (liveRefreshInFlight || booting.value || loading.value || statsLoading.value || !isAuthenticated.value) {
+		return
+	}
+	if (document.visibilityState !== 'visible') {
+		return
+	}
+
+	liveRefreshInFlight = true
+
+	try {
+		await Promise.all([loadStats({ background: true }), loadRequestLogs({ preserveScroll: true, suppressErrors: true })])
+	} finally {
+		liveRefreshInFlight = false
+	}
+}
+
+function handleVisibilityChange() {
+	if (document.visibilityState !== 'visible') {
+		return
+	}
+
+	void refreshLivePanels()
 }
 
 function beginEdit(provider: ProviderView) {
@@ -949,11 +1057,20 @@ watch(requestLogs, () => {
 
 onMounted(() => {
 	window.addEventListener('resize', syncRequestLogScrollCue)
+	document.addEventListener('visibilitychange', handleVisibilityChange)
+	liveRefreshTimer = window.setInterval(() => {
+		void refreshLivePanels()
+	}, liveRefreshIntervalMs)
 	void loadSessionState()
 })
 
 onBeforeUnmount(() => {
 	window.removeEventListener('resize', syncRequestLogScrollCue)
+	document.removeEventListener('visibilitychange', handleVisibilityChange)
+	if (liveRefreshTimer !== null) {
+		window.clearInterval(liveRefreshTimer)
+		liveRefreshTimer = null
+	}
 })
 </script>
 

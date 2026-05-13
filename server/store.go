@@ -1725,7 +1725,10 @@ func scanProxyRequestLog(scanner interface {
 		requestBodyTruncated  int
 		sentBodyTruncated     int
 		responseStatus        sql.NullInt64
+		responseHeaders       sql.NullString
+		responseBody          sql.NullString
 		responseBodyTruncated int
+		errorText             sql.NullString
 		durationMS            sql.NullInt64
 		requestedAtRaw        string
 		completedAtRaw        sql.NullString
@@ -1748,10 +1751,10 @@ func scanProxyRequestLog(scanner interface {
 		&record.SentBody,
 		&sentBodyTruncated,
 		&responseStatus,
-		&record.ResponseHeaders,
-		&record.ResponseBody,
+		&responseHeaders,
+		&responseBody,
 		&responseBodyTruncated,
-		&record.ErrorText,
+		&errorText,
 		&durationMS,
 		&requestedAtRaw,
 		&completedAtRaw,
@@ -1762,7 +1765,10 @@ func scanProxyRequestLog(scanner interface {
 	record.RequestBodyTruncated = requestBodyTruncated == 1
 	record.SentBodyTruncated = sentBodyTruncated == 1
 	record.ResponseStatus = responseStatus
+	record.ResponseHeaders = responseHeaders.String
+	record.ResponseBody = responseBody.String
 	record.ResponseBodyTruncated = responseBodyTruncated == 1
+	record.ErrorText = errorText.String
 	record.DurationMS = durationMS
 
 	requestedAt, err := time.Parse(time.RFC3339, requestedAtRaw)
