@@ -72,11 +72,13 @@ function onRangeChange(event: Event) {
 					title="Recent 7 days"
 					subtitle="Token usage grouped by day from the last seven calendar days."
 					:buckets="props.stats.daily"
+					bucket-label-kind="day"
 				/>
 				<TokenUsageChart
 					title="Recent 12 hours"
 					subtitle="Token usage grouped by hour from the last twelve clock hours."
 					:buckets="props.stats.hourly"
+					bucket-label-kind="hour"
 				/>
 			</div>
 		</div>

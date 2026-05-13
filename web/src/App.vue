@@ -558,7 +558,11 @@ async function loadStats() {
 	statsError.value = ''
 
 	try {
-		const payload = await request<RequestStatsView>(`/api/stats?range=${encodeURIComponent(statsRange.value)}`)
+		const params = new URLSearchParams({
+			range: statsRange.value,
+			timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+		})
+		const payload = await request<RequestStatsView>(`/api/stats?${params.toString()}`)
 		if (requestVersion !== statsRequestVersion) {
 			return
 		}

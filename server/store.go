@@ -303,7 +303,8 @@ type requestStatsSummaryView struct {
 // requestStatsBucketView is one bucket in the token-usage charts returned by
 // the stats API.
 type requestStatsBucketView struct {
-	// Start is the UTC bucket start timestamp.
+	// Start is the bucket start timestamp encoded in RFC3339 with the selected
+	// chart timezone offset.
 	Start string `json:"start"`
 	// Label is the human-readable label shown in the chart.
 	Label string `json:"label"`
@@ -356,7 +357,8 @@ type requestStatsBucketFrame struct {
 	Start time.Time
 	// End marks the exclusive end of the bucket.
 	End time.Time
-	// Label is the human-readable label shown in the chart.
+	// Label is the human-readable label preserved for compatibility with clients
+	// that still read server-rendered bucket text.
 	Label string
 	// Requests counts requests that began in this bucket.
 	Requests int64
@@ -1089,7 +1091,11 @@ func (s *store) countOngoingProxyRequestLogs(ctx context.Context) (int64, error)
 
 // listRequestStats returns the selected summary metrics together with the fixed
 // recent daily and hourly token-usage charts for the dashboard.
-func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow, now time.Time) (requestStatsView, error) {
+func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow, now time.Time, location *time.Location) (requestStatsView, error) {
+	if location == nil {
+		location = time.UTC
+	}
+
 	summaryLogs, err := s.listProxyRequestLogsBetween(ctx, window.From, now)
 	if err != nil {
 		return requestStatsView{}, err
@@ -1102,13 +1108,14 @@ func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow,
 	}
 	summary.OngoingRequests = ongoing
 
-	dailyStart := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -6)
+	localNow := now.In(location)
+	dailyStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location).AddDate(0, 0, -6)
 	dailyLogs, err := s.listProxyRequestLogsBetween(ctx, &dailyStart, now)
 	if err != nil {
 		return requestStatsView{}, err
 	}
 
-	hourlyStart := now.UTC().Truncate(time.Hour).Add(-11 * time.Hour)
+	hourlyStart := localNow.Truncate(time.Hour).Add(-11 * time.Hour)
 	hourlyLogs, err := s.listProxyRequestLogsBetween(ctx, &hourlyStart, now)
 	if err != nil {
 		return requestStatsView{}, err
@@ -1118,8 +1125,8 @@ func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow,
 		Range:      window.Key,
 		RangeLabel: window.Label,
 		Summary:    summary,
-		Daily:      buildDailyRequestStatsBuckets(dailyLogs, dailyStart),
-		Hourly:     buildHourlyRequestStatsBuckets(hourlyLogs, hourlyStart),
+		Daily:      buildDailyRequestStatsBuckets(dailyLogs, dailyStart, location),
+		Hourly:     buildHourlyRequestStatsBuckets(hourlyLogs, hourlyStart, location),
 	}, nil
 }
 
@@ -1972,8 +1979,12 @@ func summarizeRequestLogs(logs []proxyRequestLogRecord) requestStatsSummaryView 
 }
 
 // buildDailyRequestStatsBuckets aggregates logs into 7 calendar-day buckets
-// starting at the provided UTC midnight.
-func buildDailyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time) []requestStatsBucketView {
+// starting at the provided local midnight in the selected chart timezone.
+func buildDailyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time, location *time.Location) []requestStatsBucketView {
+	if location == nil {
+		location = time.UTC
+	}
+
 	frames := make([]requestStatsBucketFrame, 0, 7)
 	for index := 0; index < 7; index++ {
 		bucketStart := start.AddDate(0, 0, index)
@@ -1984,13 +1995,17 @@ func buildDailyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time
 		})
 	}
 
-	applyRequestLogsToBuckets(frames, logs)
+	applyRequestLogsToBuckets(frames, logs, location)
 	return requestStatsBucketFramesToViews(frames)
 }
 
 // buildHourlyRequestStatsBuckets aggregates logs into 12 hourly buckets
-// starting at the provided UTC hour boundary.
-func buildHourlyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time) []requestStatsBucketView {
+// starting at the provided local hour boundary in the selected chart timezone.
+func buildHourlyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time, location *time.Location) []requestStatsBucketView {
+	if location == nil {
+		location = time.UTC
+	}
+
 	frames := make([]requestStatsBucketFrame, 0, 12)
 	for index := 0; index < 12; index++ {
 		bucketStart := start.Add(time.Duration(index) * time.Hour)
@@ -2001,19 +2016,24 @@ func buildHourlyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Tim
 		})
 	}
 
-	applyRequestLogsToBuckets(frames, logs)
+	applyRequestLogsToBuckets(frames, logs, location)
 	return requestStatsBucketFramesToViews(frames)
 }
 
 // applyRequestLogsToBuckets updates the matching bucket for each audited request.
-func applyRequestLogsToBuckets(frames []requestStatsBucketFrame, logs []proxyRequestLogRecord) {
+func applyRequestLogsToBuckets(frames []requestStatsBucketFrame, logs []proxyRequestLogRecord, location *time.Location) {
+	if location == nil {
+		location = time.UTC
+	}
+
 	if len(frames) == 0 {
 		return
 	}
 
 	for _, log := range logs {
+		requestedAt := log.RequestedAt.In(location)
 		for index := range frames {
-			if log.RequestedAt.Before(frames[index].Start) || !log.RequestedAt.Before(frames[index].End) {
+			if requestedAt.Before(frames[index].Start) || !requestedAt.Before(frames[index].End) {
 				continue
 			}
 
@@ -2037,7 +2057,7 @@ func requestStatsBucketFramesToViews(frames []requestStatsBucketFrame) []request
 	views := make([]requestStatsBucketView, 0, len(frames))
 	for _, frame := range frames {
 		views = append(views, requestStatsBucketView{
-			Start:                frame.Start.UTC().Format(time.RFC3339),
+			Start:                frame.Start.Format(time.RFC3339),
 			Label:                frame.Label,
 			Requests:             frame.Requests,
 			Succeeded:            frame.Succeeded,
