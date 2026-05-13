@@ -23,7 +23,7 @@ trap cleanup EXIT
 
 mkdir -p "${DIST_DIR}"
 pnpm --dir "${ROOT_DIR}/web" build
-GOOS="${TARGET_OS}" GOARCH="${TARGET_ARCH}" go build -ldflags "-X github.com/silverling/aggr/server.buildVersion=${VERSION}" -o "${WORK_DIR}/aggr" "${ROOT_DIR}/server/cmd/aggr"
+GOOS="${TARGET_OS}" GOARCH="${TARGET_ARCH}" go build -ldflags "-X github.com/silverling/aggr/server.buildVersion=${VERSION} -w -s" -o "${WORK_DIR}/aggr" "${ROOT_DIR}/server/cmd/aggr"
 cp "${ROOT_DIR}/deploy/systemd/aggr.service" "${WORK_DIR}/aggr.service"
 tar -czf "${DIST_DIR}/${ASSET_NAME}" -C "${WORK_DIR}" aggr aggr.service
 echo "Created ${DIST_DIR}/${ASSET_NAME}"
