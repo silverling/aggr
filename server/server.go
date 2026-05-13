@@ -467,13 +467,19 @@ func (s *server) handleSetModelDisableRule(w http.ResponseWriter, r *http.Reques
 // fixed recent token-usage charts for the dashboard.
 func (s *server) handleGetRequestStats(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
+	location, err := parseRequestStatsTimeZone(r.URL.Query().Get("timeZone"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	window, err := parseRequestStatsWindow(r.URL.Query().Get("range"), now)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	stats, err := s.store.listRequestStats(r.Context(), window, now)
+	stats, err := s.store.listRequestStats(r.Context(), window, now, location)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1064,6 +1070,24 @@ func parseRequestStatsWindow(raw string, now time.Time) (requestStatsWindow, err
 	default:
 		return requestStatsWindow{}, fmt.Errorf("invalid stats range %q", raw)
 	}
+}
+
+// parseRequestStatsTimeZone converts the optional stats timeZone query
+// parameter into the IANA location used to align chart bucket boundaries. When
+// the caller omits the field, UTC is used so older clients keep the previous
+// server behavior.
+func parseRequestStatsTimeZone(raw string) (*time.Location, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.UTC, nil
+	}
+
+	location, err := time.LoadLocation(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timeZone %q: must be an IANA time zone", raw)
+	}
+
+	return location, nil
 }
 
 // writeJSON writes a JSON response with the provided status code.

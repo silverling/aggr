@@ -6,6 +6,7 @@ const props = defineProps<{
 	title: string
 	subtitle: string
 	buckets: RequestStatsBucket[]
+	bucketLabelKind: 'day' | 'hour'
 }>()
 
 const compactNumberFormatter = new Intl.NumberFormat(undefined, {
@@ -13,9 +14,36 @@ const compactNumberFormatter = new Intl.NumberFormat(undefined, {
 	notation: 'compact',
 })
 
+const dailyLabelFormatter = new Intl.DateTimeFormat(undefined, {
+	month: 'short',
+	day: 'numeric',
+})
+
+const hourlyLabelFormatter = new Intl.DateTimeFormat(undefined, {
+	hour: 'numeric',
+	minute: '2-digit',
+	hour12: false,
+})
+
+const tooltipFormatter = new Intl.DateTimeFormat(undefined, {
+	dateStyle: 'medium',
+	timeStyle: 'short',
+})
+
 const maxConsumedTokens = computed(() =>
 	Math.max(1, ...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens)),
 )
+
+// bucketStart parses the RFC3339 bucket start timestamp so labels and tooltips
+// can be rendered in the viewer's local timezone.
+function bucketStart(bucket: RequestStatsBucket) {
+	const parsed = new Date(bucket.start)
+	if (Number.isNaN(parsed.valueOf())) {
+		return null
+	}
+
+	return parsed
+}
 
 function formatCompactNumber(value: number) {
 	return compactNumberFormatter.format(value)
@@ -25,9 +53,31 @@ function segmentHeight(tokens: number) {
 	return `${Math.max(0, (tokens / maxConsumedTokens.value) * 100)}%`
 }
 
+// bucketLabel derives a user-local chart label from the bucket start time while
+// preserving the API label as a fallback for malformed timestamps.
+function bucketLabel(bucket: RequestStatsBucket) {
+	const parsed = bucketStart(bucket)
+	if (parsed === null) {
+		return bucket.label
+	}
+
+	return props.bucketLabelKind === 'day' ? dailyLabelFormatter.format(parsed) : hourlyLabelFormatter.format(parsed)
+}
+
+// bucketTimeRange describes the bucket's start in the user's local timezone so
+// hover tooltips align with the displayed chart labels.
+function bucketTimeRange(bucket: RequestStatsBucket) {
+	const parsed = bucketStart(bucket)
+	if (parsed === null) {
+		return bucket.label
+	}
+
+	return tooltipFormatter.format(parsed)
+}
+
 function bucketTitle(bucket: RequestStatsBucket) {
 	return [
-		`${bucket.label}`,
+		`${bucketTimeRange(bucket)}`,
 		`Requests: ${bucket.requests}`,
 		`Succeeded: ${bucket.succeeded}`,
 		`Failed: ${bucket.failed}`,
@@ -97,7 +147,7 @@ function bucketTitle(bucket: RequestStatsBucket) {
 					></div>
 				</div>
 				<div class="grid gap-1 text-center">
-					<span class="font-mono text-[0.8rem] font-bold text-ink-strong">{{ bucket.label }}</span>
+					<span class="font-mono text-[0.8rem] font-bold text-ink-strong">{{ bucketLabel(bucket) }}</span>
 					<span class="text-[0.76rem] text-ink-soft">{{ bucket.requests }} req</span>
 				</div>
 			</div>
