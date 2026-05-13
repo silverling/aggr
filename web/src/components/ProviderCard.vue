@@ -82,7 +82,7 @@ function pendingRule(modelId: string) {
 				:class="[
 					'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
 					pendingRule(model)?.disabled
-						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+						? 'border-[rgba(164,63,63,0.24)] bg-danger-soft text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: isSelected(model)
 							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 							: isModelDisabled(model)
@@ -98,28 +98,11 @@ function pendingRule(modelId: string) {
 		<p v-else class="text-ink-soft">No models synced yet.</p>
 
 		<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				@click="emit('edit')"
-			>
-				Edit
-			</button>
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				:disabled="props.syncing"
-				@click="emit('sync')"
-			>
+			<button class="btn-accent" type="button" @click="emit('edit')">Edit</button>
+			<button class="btn-accent" type="button" :disabled="props.syncing" @click="emit('sync')">
 				{{ props.syncing ? 'Syncing…' : 'Sync models' }}
 			</button>
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				@click="emit('delete')"
-			>
-				Delete
-			</button>
+			<button class="btn-danger" type="button" @click="emit('delete')">Delete</button>
 		</div>
 	</article>
 </template>

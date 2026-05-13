@@ -9,7 +9,7 @@ import {
 	prettyJSONString,
 } from '../lib/utils'
 import type { ProxyRequestLogSummaryView, ProxyRequestLogView } from '../types'
-import { Package, Building2, Clock, ClockArrowUp } from '@lucide/vue'
+import { Package, Building2, Clock, ClockArrowUp, ArrowRight, ArrowLeft, ArrowRightFromLine, RefreshCcw, Ratio } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
@@ -474,20 +474,35 @@ onBeforeUnmount(() => {
 				</div>
 
 				<div v-if="summaryStatus?.toString().startsWith('2')" class="flex flex-wrap gap-2 font-mono text-[0.72rem] text-ink-soft">
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5"
-						>cached {{ formatTokenCount(props.requestLog.cachedInputTokens) }}</span
+					<span
+						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
+						:title="`Cached ${props.requestLog.cachedInputTokens} tokens`"
 					>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5">
-						non-cached {{ formatTokenCount(props.requestLog.nonCachedInputTokens) }}
+						<ArrowRightFromLine class="size-3" /> {{ formatTokenCount(props.requestLog.cachedInputTokens) }}
 					</span>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5"
-						>output {{ formatTokenCount(props.requestLog.outputTokens) }}</span
+					<span
+						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
+						:title="`Non-cached ${props.requestLog.nonCachedInputTokens} tokens`"
 					>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5"
-						>total {{ formatTokenCount(props.requestLog.totalTokens) }}</span
+						<ArrowRight class="size-3" /> {{ formatTokenCount(props.requestLog.nonCachedInputTokens) }}
+					</span>
+					<span
+						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
+						:title="`Output ${props.requestLog.outputTokens} tokens`"
 					>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5">
-						rate {{ formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens) }}</span
+						<ArrowLeft class="size-3" /> {{ formatTokenCount(props.requestLog.outputTokens) }}
+					</span>
+					<span
+						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
+						:title="`Total ${props.requestLog.totalTokens} tokens`"
+					>
+						<RefreshCcw class="size-3" /> {{ formatTokenCount(props.requestLog.totalTokens) }}
+					</span>
+					<span
+						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
+						:title="`Cache rate ${formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens)}`"
+					>
+						<Ratio class="size-3" /> {{ formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens) }}</span
 					>
 				</div>
 			</div>

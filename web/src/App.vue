@@ -1180,11 +1180,7 @@ onBeforeUnmount(() => {
 						required
 					/>
 				</label>
-				<button
-					class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-					type="submit"
-					:disabled="loggingIn"
-				>
+				<button class="btn-primary" type="submit" :disabled="loggingIn">
 					{{ loggingIn ? 'Signing in…' : 'Sign in' }}
 				</button>
 			</form>
@@ -1209,7 +1205,7 @@ onBeforeUnmount(() => {
 					>
 						<div class="max-w-190">
 							<p class="mb-3 flex items-center gap-2">
-								<span class="text-xs font-bold uppercase tracking-widest text-accent">Unified gateway</span>
+								<span class="eyebrow">Unified gateway</span>
 								<span
 									v-if="appVersion"
 									class="inline-flex items-center rounded-full border border-line bg-surface-strong px-3 py-1 font-mono text-[0.78rem] font-bold text-ink-strong"
@@ -1221,36 +1217,20 @@ onBeforeUnmount(() => {
 						</div>
 
 						<div class="flex flex-wrap items-center gap-3 max-lg:flex-col max-lg:items-stretch">
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="button"
-								:disabled="loading"
-								@click="loadDashboard(true)"
-							>
+							<button class="btn-accent" type="button" :disabled="loading" @click="loadDashboard(true)">
 								{{ loading ? 'Refreshing…' : 'Refresh dashboard' }}
 							</button>
-							<button
-								class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="button"
-								:disabled="syncingAll"
-								@click="syncAll"
-							>
+							<button class="btn-primary" type="button" :disabled="syncingAll" @click="syncAll">
 								{{ syncingAll ? 'Syncing catalogs…' : 'Sync all providers' }}
 							</button>
-							<button
-								class="ml-auto inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-								type="button"
-								@click="logout"
-							>
-								Sign out
-							</button>
+							<button class="ml-auto btn-accent" type="button" @click="logout">Sign out</button>
 						</div>
 
 						<div class="grid gap-4.5 md:grid-cols-2 xl:grid-cols-4">
-							<StatCard label="Providers" :value="providerCount" :description="`${enabledProviderCount} enabled for routing`" />
-							<StatCard label="Models" :value="modelCount" description="From synced `/v1/models` catalogs" />
-							<StatCard label="Aliases" :value="modelAliasCount" description="Public model names mapped to upstream targets" />
-							<StatCard label="Coverage overlap" :value="duplicateCoverageCount" description="Models offered by multiple providers" />
+							<StatCard label="Providers" :value="providerCount" />
+							<StatCard label="Models" :value="modelCount" />
+							<StatCard label="Aliases" :value="modelAliasCount" />
+							<StatCard label="Coverage overlap" :value="duplicateCoverageCount" />
 						</div>
 					</header>
 
@@ -1269,13 +1249,10 @@ onBeforeUnmount(() => {
 					>
 						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 							<div>
-								<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Access control</p>
+								<p class="mb-3 eyebrow">Access control</p>
 								<h2>Browser sessions and API keys</h2>
-								<p class="mt-1.5 leading-[1.6] text-ink-soft">
-									Browser sessions unlock the admin UI; gateway API keys are required for `/v1` requests.
-								</p>
 							</div>
-							<span class="text-ink-soft">{{ sessionCount }} sessions / {{ apiKeyCount }} API keys</span>
+							<span class="annotation">{{ sessionCount }} Sessions · {{ apiKeyCount }} API keys</span>
 						</div>
 
 						<div class="grid gap-4.5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -1300,11 +1277,7 @@ onBeforeUnmount(() => {
 										/>
 									</label>
 
-									<button
-										class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-										type="submit"
-										:disabled="creatingApiKey"
-									>
+									<button class="btn-primary" type="submit" :disabled="creatingApiKey">
 										{{ creatingApiKey ? 'Creating…' : 'Create API key' }}
 									</button>
 								</form>
@@ -1315,27 +1288,15 @@ onBeforeUnmount(() => {
 									class="grid gap-3 rounded-[18px] border border-accent-soft bg-accent-soft p-4"
 								>
 									<div>
-										<p class="text-xs font-bold uppercase tracking-widest text-accent">Shown once</p>
+										<p class="eyebrow">Shown once</p>
 										<h3 class="mt-1">Copy this key now</h3>
 									</div>
-									<code class="wrap-break-word rounded-[16px] border border-line bg-white/75 px-3.5 py-3 text-[0.84rem] text-ink">{{
-										generatedApiKey.apiKey
-									}}</code>
+									<code class="wrap-break-word rounded-[16px] border border-line bg-white/75 px-3.5 py-3 text-[0.84rem] text-ink">
+										{{ generatedApiKey.apiKey }}
+									</code>
 									<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
-										<button
-											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-											type="button"
-											@click="copyGeneratedAPIKey"
-										>
-											Copy key
-										</button>
-										<button
-											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-											type="button"
-											@click="resetGeneratedApiKey"
-										>
-											Dismiss
-										</button>
+										<button class="btn-accent" type="button" @click="copyGeneratedAPIKey">Copy key</button>
+										<button class="btn-accent" type="button" @click="resetGeneratedApiKey">Dismiss</button>
 									</div>
 								</div>
 
@@ -1392,7 +1353,7 @@ onBeforeUnmount(() => {
 						>
 							<div class="mb-5 flex items-start justify-between gap-3">
 								<div>
-									<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Provider config</p>
+									<p class="mb-3 eyebrow">Provider config</p>
 									<h2>{{ isEditing ? 'Update an upstream provider' : 'Add an upstream provider' }}</h2>
 								</div>
 								<button v-if="isEditing" class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="resetForm">
@@ -1454,11 +1415,7 @@ onBeforeUnmount(() => {
 									<span class="font-bold text-ink-strong">Enabled for model routing</span>
 								</label>
 
-								<button
-									class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-									type="submit"
-									:disabled="saving"
-								>
+								<button class="btn-primary" type="submit" :disabled="saving">
 									{{ saving ? 'Saving…' : isEditing ? 'Update provider' : 'Create provider' }}
 								</button>
 							</form>
@@ -1467,7 +1424,7 @@ onBeforeUnmount(() => {
 						<article data-anchor="quick-start" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
 							<div class="mb-5 flex items-start justify-between gap-3">
 								<div>
-									<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Quick start</p>
+									<p class="mb-3 eyebrow">Quick start</p>
 									<h2>Point clients at the gateway</h2>
 								</div>
 							</div>
@@ -1498,10 +1455,10 @@ onBeforeUnmount(() => {
 					>
 						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 							<div>
-								<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Model disable rules</p>
+								<p class="mb-3 eyebrow">Model disable rules</p>
 								<h2>Stage provider/model route changes</h2>
 							</div>
-							<span class="text-ink-soft">{{ pendingModelDisableRuleCount }} staged / {{ activeModelDisableRules.length }} active</span>
+							<span class="annotation">{{ pendingModelDisableRuleCount }} staged · {{ activeModelDisableRules.length }} active</span>
 						</div>
 
 						<div class="grid gap-4.5 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
@@ -1553,24 +1510,14 @@ onBeforeUnmount(() => {
 									</div>
 
 									<div class="grid gap-2.5">
-										<button
-											class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-											type="button"
-											:disabled="applyingModelDisableRule"
-											@click="applyModelDisableRule"
-										>
+										<button class="btn-primary" type="button" :disabled="applyingModelDisableRule" @click="applyModelDisableRule">
 											{{
 												applyingModelDisableRule
 													? 'Applying…'
 													: `Apply ${pendingModelDisableRuleCount} change${pendingModelDisableRuleCount === 1 ? '' : 's'}`
 											}}
 										</button>
-										<button
-											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60"
-											type="button"
-											:disabled="applyingModelDisableRule"
-											@click="clearPendingModelDisableRules"
-										>
+										<button class="btn-accent" type="button" :disabled="applyingModelDisableRule" @click="clearPendingModelDisableRules">
 											Clear all
 										</button>
 									</div>
@@ -1619,10 +1566,10 @@ onBeforeUnmount(() => {
 					<section data-anchor="model-aliases" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
 						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 							<div>
-								<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Model aliases</p>
+								<p class="mb-3 eyebrow">Model aliases</p>
 								<h2>Create public model names</h2>
 							</div>
-							<span class="text-ink-soft">{{ modelAliasCount }} alias{{ modelAliasCount === 1 ? '' : 'es' }}</span>
+							<span class="annotation">{{ modelAliasCount }} alias{{ modelAliasCount === 1 ? '' : 'es' }}</span>
 						</div>
 
 						<div class="grid gap-4.5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -1678,21 +1625,10 @@ onBeforeUnmount(() => {
 									</label>
 
 									<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-										<button
-											class="inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-											type="submit"
-											:disabled="aliasSaving"
-										>
+										<button class="btn-primary" type="submit" :disabled="aliasSaving">
 											{{ aliasSaving ? 'Saving…' : isEditingModelAlias ? 'Update alias' : 'Create alias' }}
 										</button>
-										<button
-											v-if="isEditingModelAlias"
-											class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-											type="button"
-											@click="resetModelAliasForm"
-										>
-											Cancel edit
-										</button>
+										<button v-if="isEditingModelAlias" class="btn-accent" type="button" @click="resetModelAliasForm">Cancel edit</button>
 									</div>
 								</form>
 							</article>
@@ -1729,10 +1665,10 @@ onBeforeUnmount(() => {
 					<section data-anchor="providers" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
 						<div class="mb-5 flex items-start justify-between gap-3">
 							<div>
-								<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Providers</p>
+								<p class="mb-3 eyebrow">Providers</p>
 								<h2>Routing inventory</h2>
 							</div>
-							<span class="text-ink-soft">{{ enabledProviderCount }} active / {{ providerCount }} total</span>
+							<span class="annotation">{{ enabledProviderCount }} active / {{ providerCount }} total</span>
 						</div>
 
 						<div
@@ -1760,10 +1696,10 @@ onBeforeUnmount(() => {
 					<section data-anchor="models" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
 						<div class="mb-5 flex items-start justify-between gap-3">
 							<div>
-								<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Model catalog</p>
+								<p class="mb-3 eyebrow">Model catalog</p>
 								<h2>Aggregated routing table</h2>
 							</div>
-							<span class="text-ink-soft">{{ modelCount }} routable models</span>
+							<span class="annotation">{{ modelCount }} routable models</span>
 						</div>
 
 						<div v-if="models.length === 0" class="rounded-card border border-line bg-surface-strong px-5.5 py-6.5 leading-[1.6] text-ink-soft">
@@ -1784,10 +1720,10 @@ onBeforeUnmount(() => {
 					<section data-anchor="request-logs" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
 						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 							<div>
-								<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Request audit</p>
+								<p class="mb-3 eyebrow">Request audit</p>
 								<h2>Recent gateway traffic</h2>
 							</div>
-							<span class="text-ink-soft">{{ requestLogCount }} recent rows</span>
+							<span class="annotation">{{ requestLogCount }} recent rows</span>
 						</div>
 
 						<div data-anchor="request-log-clear" class="mb-5 grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
@@ -1832,19 +1768,8 @@ onBeforeUnmount(() => {
 							</div>
 
 							<div class="flex flex-wrap items-center justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
-								<button
-									class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-									type="button"
-									@click="resetRequestLogFilters"
-								>
-									Reset filters
-								</button>
-								<button
-									class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-									type="button"
-									:disabled="clearingLogs"
-									@click="clearLogs"
-								>
+								<button class="btn-accent" type="button" @click="resetRequestLogFilters">Reset filters</button>
+								<button class="btn-danger" type="button" :disabled="clearingLogs" @click="clearLogs">
 									{{ clearingLogs ? 'Clearing…' : 'Clear matching logs' }}
 								</button>
 							</div>

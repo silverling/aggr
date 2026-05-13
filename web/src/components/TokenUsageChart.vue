@@ -5,7 +5,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{
 	title: string
-	subtitle: string
+	subtitle?: string
 	buckets: RequestStatsBucket[]
 	bucketLabelKind: 'day' | 'hour'
 }>()
@@ -90,7 +90,7 @@ function bucketTitle(bucket: RequestStatsBucket) {
 					Max {{ formatCompactNumber(maxConsumedTokens) }}
 				</span>
 			</h3>
-			<p class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
+			<p v-if="props.subtitle" class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
 		</div>
 
 		<div class="flex flex-wrap items-center gap-3 text-sm text-ink-soft">

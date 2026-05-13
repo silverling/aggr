@@ -71,6 +71,7 @@
 	h2,
 	h3 {
 		@apply text-ink-strong;
+		font-weight: 600;
 		margin: 0;
 	}
 
@@ -92,4 +93,24 @@
 	h3 {
 		font-size: 1.08rem;
 	}
+}
+
+@utility eyebrow {
+	@apply text-accent text-xs font-bold tracking-wide uppercase;
+}
+
+@utility annotation {
+	@apply text-ink-soft text-sm font-semibold;
+}
+
+@utility btn-primary {
+	@apply inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full;
+}
+
+@utility btn-accent {
+	@apply border-line text-ink-strong inline-flex min-h-12 items-center justify-center rounded-full border bg-[rgba(255,255,255,0.72)] px-4.5 font-bold transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full;
+}
+
+@utility btn-danger {
+	@apply text-danger inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-4.5 font-bold transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full;
 }

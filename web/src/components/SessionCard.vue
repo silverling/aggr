@@ -56,12 +56,7 @@ function formatTimestamp(value: string) {
 		</div>
 
 		<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				:disabled="props.deleting"
-				@click="emit('delete')"
-			>
+			<button class="btn-danger" type="button" :disabled="props.deleting" @click="emit('delete')">
 				{{ props.deleting ? 'Revoking…' : 'Revoke session' }}
 			</button>
 		</div>
