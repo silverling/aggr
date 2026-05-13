@@ -1250,13 +1250,13 @@ onBeforeUnmount(() => {
 						<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
 							<div>
 								<p class="mb-3 eyebrow">Access control</p>
-								<h2>Browser sessions and API keys</h2>
+								<h2>API keys and Sessions</h2>
 							</div>
 							<span class="annotation">{{ sessionCount }} Sessions · {{ apiKeyCount }} API keys</span>
 						</div>
 
 						<div class="grid gap-4.5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-							<article data-anchor="api-key-manager" class="grid gap-4 rounded-card border border-line bg-surface-strong p-4.5">
+							<article data-anchor="api-key-manager" class="flex flex-col gap-4 rounded-card border border-line bg-surface-strong p-4.5">
 								<div>
 									<h3>Create gateway API keys</h3>
 									<p class="mt-1.5 leading-[1.6] text-ink-soft">
@@ -1264,7 +1264,7 @@ onBeforeUnmount(() => {
 									</p>
 								</div>
 
-								<form class="grid gap-4" @submit.prevent="submitGatewayAPIKey">
+								<form class="flex flex-col gap-4" @submit.prevent="submitGatewayAPIKey">
 									<label class="grid gap-2">
 										<span class="text-[0.92rem] font-bold text-ink-strong">Key name</span>
 										<input
