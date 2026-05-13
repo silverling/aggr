@@ -1,7 +1,7 @@
 .PHONY: build go-build test dev web-dev web-build fmt tidy release-linux-amd64 release-linux-arm64
 
 VERSION ?= $(shell ./scripts/build-version.sh)
-GO_LDFLAGS := -X github.com/silverling/aggr/server.buildVersion=$(VERSION) -w -s
+GO_LDFLAGS := -X github.com/silverling/aggr/server.buildVersion=$(VERSION)
 
 build: go-build
 
