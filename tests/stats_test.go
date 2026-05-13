@@ -78,6 +78,14 @@ type testProxyRequestLogSeed struct {
 	ResponseStatus *int
 	// ResponseBody is the stored response body payload.
 	ResponseBody string
+	// CachedInputTokens is the persisted cached-input token count for the row.
+	CachedInputTokens int64
+	// NonCachedInputTokens is the persisted non-cached input token count for the row.
+	NonCachedInputTokens int64
+	// OutputTokens is the persisted output token count for the row.
+	OutputTokens int64
+	// TotalTokens is the persisted total token count for the row.
+	TotalTokens int64
 	// RequestedAt is when the request started.
 	RequestedAt time.Time
 	// CompletedAt is when the request finished, or nil when it is still ongoing.
@@ -133,22 +141,30 @@ func TestRequestStatsSummariesAndCharts(t *testing.T) {
 	fiveHoursAgoCompletedAt := now.Add(-5*time.Hour + 3*time.Minute)
 	twoDaysAgoCompletedAt := now.AddDate(0, 0, -2).Add(11 * time.Minute)
 	insertTestProxyRequestLog(t, db, testProxyRequestLogSeed{
-		Method:         http.MethodPost,
-		Path:           "/v1/responses",
-		ModelID:        "gpt-4.1",
-		ResponseStatus: intPointer(http.StatusOK),
-		ResponseBody:   `{"usage":{"input_tokens":8,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}`,
-		RequestedAt:    fiveHoursAgoRequestedAt,
-		CompletedAt:    &fiveHoursAgoCompletedAt,
+		Method:               http.MethodPost,
+		Path:                 "/v1/responses",
+		ModelID:              "gpt-4.1",
+		ResponseStatus:       intPointer(http.StatusOK),
+		ResponseBody:         `{"usage":{"input_tokens":8,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}`,
+		CachedInputTokens:    2,
+		NonCachedInputTokens: 6,
+		OutputTokens:         3,
+		TotalTokens:          11,
+		RequestedAt:          fiveHoursAgoRequestedAt,
+		CompletedAt:          &fiveHoursAgoCompletedAt,
 	})
 	insertTestProxyRequestLog(t, db, testProxyRequestLogSeed{
-		Method:         http.MethodPost,
-		Path:           "/v1/chat/completions",
-		ModelID:        "gpt-4.1",
-		ResponseStatus: intPointer(http.StatusOK),
-		ResponseBody:   `{"usage":{"prompt_tokens":18,"completion_tokens":6,"prompt_tokens_details":{"cached_tokens":5}}}`,
-		RequestedAt:    now.AddDate(0, 0, -2),
-		CompletedAt:    &twoDaysAgoCompletedAt,
+		Method:               http.MethodPost,
+		Path:                 "/v1/chat/completions",
+		ModelID:              "gpt-4.1",
+		ResponseStatus:       intPointer(http.StatusOK),
+		ResponseBody:         `{"usage":{"prompt_tokens":18,"completion_tokens":6,"prompt_tokens_details":{"cached_tokens":5}}}`,
+		CachedInputTokens:    5,
+		NonCachedInputTokens: 13,
+		OutputTokens:         6,
+		TotalTokens:          24,
+		RequestedAt:          now.AddDate(0, 0, -2),
+		CompletedAt:          &twoDaysAgoCompletedAt,
 	})
 	insertTestProxyRequestLog(t, db, testProxyRequestLogSeed{
 		Method:       http.MethodPost,
@@ -308,8 +324,8 @@ func insertTestProxyRequestLog(t *testing.T, db *sql.DB, seed testProxyRequestLo
 			request_headers, request_body, request_body_truncated,
 			sent_request_method, sent_request_url, sent_request_headers, sent_request_body, sent_request_body_truncated,
 			response_status, response_headers, response_body, response_body_truncated,
-			error_text, duration_ms, requested_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			error_text, duration_ms, cached_input_tokens, non_cached_input_tokens, output_tokens, total_tokens, requested_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		nil,
 		"",
@@ -331,6 +347,10 @@ func insertTestProxyRequestLog(t *testing.T, db *sql.DB, seed testProxyRequestLo
 		0,
 		"",
 		nil,
+		seed.CachedInputTokens,
+		seed.NonCachedInputTokens,
+		seed.OutputTokens,
+		seed.TotalTokens,
 		seed.RequestedAt.UTC().Format(time.RFC3339),
 		completedAt,
 	)

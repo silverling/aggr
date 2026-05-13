@@ -91,6 +91,25 @@ export interface ModelAliasesPayload {
 	aliases: ModelAliasView[]
 }
 
+export interface ProxyRequestLogSummaryView {
+	id: number
+	providerId?: number
+	providerName?: string
+	modelId?: string
+	method: string
+	path: string
+	rawQuery?: string
+	status?: number
+	error?: string
+	durationMs?: number
+	cachedInputTokens: number
+	nonCachedInputTokens: number
+	outputTokens: number
+	totalTokens: number
+	requestedAt: string
+	completedAt?: string
+}
+
 export interface ProxyRequestLogView {
 	id: number
 	providerId?: number
@@ -100,6 +119,10 @@ export interface ProxyRequestLogView {
 	sentRequest?: ProxyRequestSentRequestView
 	receivedResponse: ProxyRequestReceivedResponseView
 	durationMs?: number
+	cachedInputTokens: number
+	nonCachedInputTokens: number
+	outputTokens: number
+	totalTokens: number
 	requestedAt: string
 	completedAt?: string
 }
@@ -130,7 +153,7 @@ export interface ProxyRequestReceivedResponseView {
 }
 
 export interface ProxyRequestsPayload {
-	requests: ProxyRequestLogView[]
+	requests: ProxyRequestLogSummaryView[]
 }
 
 export interface RequestStatsSummary {

@@ -28,6 +28,7 @@ import type {
 	ProviderView,
 	ProvidersPayload,
 	ProxyRequestLogView,
+	ProxyRequestLogSummaryView,
 	ProxyRequestsPayload,
 	SectionOutlineItem,
 	StatsRangeOption,
@@ -47,7 +48,7 @@ const apiKeyForm = reactive({
 const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
 const modelAliases = ref<ModelAliasView[]>([])
-const requestLogs = ref<ProxyRequestLogView[]>([])
+const requestLogs = ref<ProxyRequestLogSummaryView[]>([])
 const authState = ref<AuthSessionStateResponse | null>(null)
 const sessions = ref<AuthSessionView[]>([])
 const apiKeys = ref<GatewayApiKeyView[]>([])
@@ -121,6 +122,8 @@ const modelAliasCount = computed(() => modelAliases.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
 const requestLogList = ref<HTMLElement | null>(null)
+const isPageActive = ref(true)
+const showRequestLogTopGlow = ref(false)
 const showRequestLogScrollCue = ref(false)
 const sessionCount = computed(() => sessions.value.length)
 const apiKeyCount = computed(() => apiKeys.value.length)
@@ -667,11 +670,50 @@ async function loadRequestLogs(options: LoadRequestLogsOptions = {}) {
 	}
 }
 
-async function refreshLivePanels() {
-	if (liveRefreshInFlight || booting.value || loading.value || statsLoading.value || !isAuthenticated.value) {
+async function loadRequestLogDetail(id: number): Promise<ProxyRequestLogView> {
+	try {
+		return await request<ProxyRequestLogView>(`/api/requests/${id}`)
+	} catch (error) {
+		if (handleAuthError(error)) {
+			throw error
+		}
+
+		throw error instanceof Error ? error : new Error(`Failed to load request log #${id}.`)
+	}
+}
+
+function syncPageActivityState() {
+	isPageActive.value = document.visibilityState === 'visible' && document.hasFocus()
+}
+
+function stopLiveRefreshTimer() {
+	if (liveRefreshTimer !== null) {
+		window.clearInterval(liveRefreshTimer)
+		liveRefreshTimer = null
+	}
+}
+
+function startLiveRefreshTimer() {
+	if (liveRefreshTimer !== null || !isPageActive.value) {
 		return
 	}
-	if (document.visibilityState !== 'visible') {
+
+	liveRefreshTimer = window.setInterval(() => {
+		void refreshLivePanels()
+	}, liveRefreshIntervalMs)
+}
+
+function syncLiveRefreshTimer() {
+	if (!isPageActive.value) {
+		stopLiveRefreshTimer()
+		return
+	}
+
+	startLiveRefreshTimer()
+}
+
+async function refreshLivePanels() {
+	if (liveRefreshInFlight || booting.value || loading.value || statsLoading.value || !isAuthenticated.value || !isPageActive.value) {
 		return
 	}
 
@@ -684,8 +726,10 @@ async function refreshLivePanels() {
 	}
 }
 
-function handleVisibilityChange() {
-	if (document.visibilityState !== 'visible') {
+function handlePageActivityChange() {
+	syncPageActivityState()
+	syncLiveRefreshTimer()
+	if (!isPageActive.value) {
 		return
 	}
 
@@ -1033,10 +1077,12 @@ async function clearLogs() {
 function syncRequestLogScrollCue() {
 	const element = requestLogList.value
 	if (element === null) {
+		showRequestLogTopGlow.value = false
 		showRequestLogScrollCue.value = false
 		return
 	}
 
+	showRequestLogTopGlow.value = element.scrollTop > 12
 	const remainingScroll = element.scrollHeight - element.clientHeight - element.scrollTop
 	showRequestLogScrollCue.value = remainingScroll > 12
 }
@@ -1056,21 +1102,21 @@ watch(requestLogs, () => {
 })
 
 onMounted(() => {
+	syncPageActivityState()
 	window.addEventListener('resize', syncRequestLogScrollCue)
-	document.addEventListener('visibilitychange', handleVisibilityChange)
-	liveRefreshTimer = window.setInterval(() => {
-		void refreshLivePanels()
-	}, liveRefreshIntervalMs)
+	document.addEventListener('visibilitychange', handlePageActivityChange)
+	window.addEventListener('focus', handlePageActivityChange)
+	window.addEventListener('blur', handlePageActivityChange)
+	syncLiveRefreshTimer()
 	void loadSessionState()
 })
 
 onBeforeUnmount(() => {
 	window.removeEventListener('resize', syncRequestLogScrollCue)
-	document.removeEventListener('visibilitychange', handleVisibilityChange)
-	if (liveRefreshTimer !== null) {
-		window.clearInterval(liveRefreshTimer)
-		liveRefreshTimer = null
-	}
+	document.removeEventListener('visibilitychange', handlePageActivityChange)
+	window.removeEventListener('focus', handlePageActivityChange)
+	window.removeEventListener('blur', handlePageActivityChange)
+	stopLiveRefreshTimer()
 })
 </script>
 
@@ -1812,16 +1858,31 @@ onBeforeUnmount(() => {
 						</div>
 
 						<div v-else class="relative">
-							<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto pb-8 pr-1 pt-1" @scroll="syncRequestLogScrollCue">
-								<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
+							<div class="relative overflow-hidden rounded-card">
+								<div v-if="showRequestLogTopGlow" class="pointer-events-none absolute inset-x-0 top-0 z-10 h-6">
+									<div class="absolute inset-x-0 top-0 h-px bg-[rgba(24,34,47,0.06)]" />
+									<div class="absolute inset-x-4 -top-3.5 h-9 rounded-full bg-line-strong opacity-70 blur-md" />
+									<div
+										class="absolute inset-x-0 top-0 h-6 bg-linear-to-b from-[rgba(24,34,47,0.06)] via-[rgba(24,34,47,0.025)] to-transparent"
+									/>
+								</div>
+								<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto px-1 pb-8 pt-1" @scroll="syncRequestLogScrollCue">
+									<RequestLogCard
+										v-for="requestLog in requestLogs"
+										:key="requestLog.id"
+										:page-active="isPageActive"
+										:request-log="requestLog"
+										:load-request-log-detail="loadRequestLogDetail"
+									/>
+								</div>
+								<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-18">
+									<div class="absolute inset-x-4 -bottom-4 h-10 rounded-full bg-surface-strong opacity-95 blur-md" />
+									<div class="absolute inset-x-0 bottom-0 h-18 bg-linear-to-t from-surface via-[rgba(255,252,247,0.5)] to-transparent" />
+								</div>
 							</div>
-							<div
-								v-if="showRequestLogScrollCue"
-								class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-18 rounded-b-card bg-linear-to-t from-surface-strong via-[rgba(255,252,247,0.74)] to-transparent"
-							/>
 							<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
 								<div
-									class="inline-flex items-center gap-2 rounded-full border border-line bg-[rgba(255,252,247,0.92)] px-3 py-1.5 text-[0.74rem] font-bold uppercase tracking-[0.16em] text-accent shadow-[0_10px_20px_rgba(24,34,47,0.08)] backdrop-blur-sm"
+									class="inline-flex items-center gap-2 rounded-full border border-line bg-[rgba(255,252,247,0.92)] px-3 py-1.5 text-[0.74rem] font-bold uppercase tracking-widest text-accent shadow-[0_10px_20px_rgba(24,34,47,0.08)] backdrop-blur-sm"
 								>
 									<ChevronsDown class="size-4" />
 									Scroll for more
