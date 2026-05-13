@@ -28,6 +28,7 @@ import type {
 	ProviderView,
 	ProvidersPayload,
 	ProxyRequestLogView,
+	ProxyRequestLogSummaryView,
 	ProxyRequestsPayload,
 	SectionOutlineItem,
 	StatsRangeOption,
@@ -47,7 +48,7 @@ const apiKeyForm = reactive({
 const providers = ref<ProviderView[]>([])
 const models = ref<ModelRoute[]>([])
 const modelAliases = ref<ModelAliasView[]>([])
-const requestLogs = ref<ProxyRequestLogView[]>([])
+const requestLogs = ref<ProxyRequestLogSummaryView[]>([])
 const authState = ref<AuthSessionStateResponse | null>(null)
 const sessions = ref<AuthSessionView[]>([])
 const apiKeys = ref<GatewayApiKeyView[]>([])
@@ -70,6 +71,7 @@ const applyingModelDisableRule = ref(false)
 const clearingLogs = ref(false)
 const pendingModelDisableRules = ref<PendingModelDisableRule[]>([])
 const requestLogLimit = 40
+const liveRefreshIntervalMs = 5000
 const statsRange = ref('24h')
 const statsRangeOptions: StatsRangeOption[] = [
 	{ value: '1h', label: 'In an hour' },
@@ -120,6 +122,8 @@ const modelAliasCount = computed(() => modelAliases.value.length)
 const duplicateCoverageCount = computed(() => models.value.filter((model) => model.providers.length > 1).length)
 const requestLogCount = computed(() => requestLogs.value.length)
 const requestLogList = ref<HTMLElement | null>(null)
+const isPageActive = ref(true)
+const showRequestLogTopGlow = ref(false)
 const showRequestLogScrollCue = ref(false)
 const sessionCount = computed(() => sessions.value.length)
 const apiKeyCount = computed(() => apiKeys.value.length)
@@ -193,6 +197,21 @@ const curlExample = computed(() =>
 		`  }'`,
 	].join('\n'),
 )
+
+type LoadStatsOptions = {
+	background?: boolean
+}
+
+type LoadRequestLogsOptions = {
+	preserveScroll?: boolean
+	suppressErrors?: boolean
+}
+
+type RequestLogScrollSnapshot = {
+	scrollHeight: number
+	scrollTop: number
+	pinnedToTop: boolean
+}
 
 function setNotice(tone: NoticeTone, text: string) {
 	if (tone === 'success') {
@@ -279,6 +298,8 @@ function resetGeneratedApiKey() {
 }
 
 function resetProtectedState() {
+	statsRequestVersion += 1
+	requestLogsRequestVersion += 1
 	providers.value = []
 	models.value = []
 	modelAliases.value = []
@@ -404,23 +425,21 @@ async function loadDashboard(showNotice = false) {
 	clearNotice()
 
 	try {
-		const [providerPayload, modelPayload, aliasPayload, requestPayload, sessionsPayload, apiKeysPayload] = await Promise.all([
+		const [providerPayload, modelPayload, aliasPayload, sessionsPayload, apiKeysPayload] = await Promise.all([
 			request<ProvidersPayload>('/api/providers'),
 			request<ModelsPayload>('/api/models'),
 			request<ModelAliasesPayload>('/api/model-aliases'),
-			request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`),
 			request<AuthSessionsPayload>('/api/auth/sessions'),
 			request<GatewayApiKeysPayload>('/api/auth/api-keys'),
 		])
 		providers.value = providerPayload.providers
 		models.value = modelPayload.models
 		modelAliases.value = aliasPayload.aliases
-		requestLogs.value = requestPayload.requests
 		sessions.value = sessionsPayload.sessions
 		apiKeys.value = apiKeysPayload.apiKeys
 		reconcilePendingModelDisableRules()
 		reconcileEditingModelAlias()
-		await loadStats()
+		await Promise.all([loadRequestLogs({ preserveScroll: true }), loadStats({ background: stats.value !== null })])
 
 		if (showNotice) {
 			setNotice('info', 'Dashboard refreshed.')
@@ -545,17 +564,24 @@ async function revokeSession(session: AuthSessionView) {
 }
 
 let statsRequestVersion = 0
+let requestLogsRequestVersion = 0
+let liveRefreshTimer: number | null = null
+let liveRefreshInFlight = false
 
-async function loadStats() {
+async function loadStats(options: LoadStatsOptions = {}) {
 	if (!isAuthenticated.value) {
 		stats.value = null
+		statsError.value = ''
 		statsLoading.value = false
 		return
 	}
 
 	const requestVersion = ++statsRequestVersion
-	statsLoading.value = true
-	statsError.value = ''
+	const showLoading = !options.background || stats.value === null
+	if (showLoading) {
+		statsLoading.value = true
+		statsError.value = ''
+	}
 
 	try {
 		const params = new URLSearchParams({
@@ -567,6 +593,7 @@ async function loadStats() {
 			return
 		}
 		stats.value = payload
+		statsError.value = ''
 	} catch (error) {
 		if (requestVersion !== statsRequestVersion) {
 			return
@@ -578,10 +605,135 @@ async function loadStats() {
 		}
 		statsError.value = error instanceof Error ? error.message : 'Failed to load stats.'
 	} finally {
-		if (requestVersion === statsRequestVersion) {
+		if (showLoading && requestVersion === statsRequestVersion) {
 			statsLoading.value = false
 		}
 	}
+}
+
+function captureRequestLogScrollSnapshot(): RequestLogScrollSnapshot | null {
+	const element = requestLogList.value
+	if (element === null) {
+		return null
+	}
+
+	return {
+		scrollHeight: element.scrollHeight,
+		scrollTop: element.scrollTop,
+		pinnedToTop: element.scrollTop <= 16,
+	}
+}
+
+function restoreRequestLogScrollSnapshot(snapshot: RequestLogScrollSnapshot | null) {
+	if (snapshot === null) {
+		return
+	}
+
+	void nextTick(() => {
+		const element = requestLogList.value
+		if (element === null || snapshot.pinnedToTop) {
+			return
+		}
+
+		const heightDelta = element.scrollHeight - snapshot.scrollHeight
+		element.scrollTop = Math.max(0, snapshot.scrollTop + heightDelta)
+		syncRequestLogScrollCue()
+	})
+}
+
+async function loadRequestLogs(options: LoadRequestLogsOptions = {}) {
+	if (!isAuthenticated.value) {
+		requestLogs.value = []
+		return
+	}
+
+	const requestVersion = ++requestLogsRequestVersion
+	const scrollSnapshot = options.preserveScroll ? captureRequestLogScrollSnapshot() : null
+
+	try {
+		const payload = await request<ProxyRequestsPayload>(`/api/requests?limit=${requestLogLimit}`)
+		if (requestVersion !== requestLogsRequestVersion) {
+			return
+		}
+
+		requestLogs.value = payload.requests
+		restoreRequestLogScrollSnapshot(scrollSnapshot)
+	} catch (error) {
+		if (requestVersion !== requestLogsRequestVersion) {
+			return
+		}
+		if (handleAuthError(error) || options.suppressErrors) {
+			return
+		}
+
+		throw error
+	}
+}
+
+async function loadRequestLogDetail(id: number): Promise<ProxyRequestLogView> {
+	try {
+		return await request<ProxyRequestLogView>(`/api/requests/${id}`)
+	} catch (error) {
+		if (handleAuthError(error)) {
+			throw error
+		}
+
+		throw error instanceof Error ? error : new Error(`Failed to load request log #${id}.`)
+	}
+}
+
+function syncPageActivityState() {
+	isPageActive.value = document.visibilityState === 'visible' && document.hasFocus()
+}
+
+function stopLiveRefreshTimer() {
+	if (liveRefreshTimer !== null) {
+		window.clearInterval(liveRefreshTimer)
+		liveRefreshTimer = null
+	}
+}
+
+function startLiveRefreshTimer() {
+	if (liveRefreshTimer !== null || !isPageActive.value) {
+		return
+	}
+
+	liveRefreshTimer = window.setInterval(() => {
+		void refreshLivePanels()
+	}, liveRefreshIntervalMs)
+}
+
+function syncLiveRefreshTimer() {
+	if (!isPageActive.value) {
+		stopLiveRefreshTimer()
+		return
+	}
+
+	startLiveRefreshTimer()
+}
+
+async function refreshLivePanels() {
+	if (liveRefreshInFlight || booting.value || loading.value || statsLoading.value || !isAuthenticated.value || !isPageActive.value) {
+		return
+	}
+
+	liveRefreshInFlight = true
+
+	try {
+		await Promise.all([loadStats({ background: true }), loadRequestLogs({ preserveScroll: true, suppressErrors: true })])
+	} finally {
+		liveRefreshInFlight = false
+	}
+}
+
+function handlePageActivityChange() {
+	syncPageActivityState()
+	syncLiveRefreshTimer()
+	if (!isPageActive.value) {
+		return
+	}
+
+	void refreshLivePanels()
 }
 
 function beginEdit(provider: ProviderView) {
@@ -925,10 +1077,12 @@ async function clearLogs() {
 function syncRequestLogScrollCue() {
 	const element = requestLogList.value
 	if (element === null) {
+		showRequestLogTopGlow.value = false
 		showRequestLogScrollCue.value = false
 		return
 	}
 
+	showRequestLogTopGlow.value = element.scrollTop > 12
 	const remainingScroll = element.scrollHeight - element.clientHeight - element.scrollTop
 	showRequestLogScrollCue.value = remainingScroll > 12
 }
@@ -948,12 +1102,21 @@ watch(requestLogs, () => {
 })
 
 onMounted(() => {
+	syncPageActivityState()
 	window.addEventListener('resize', syncRequestLogScrollCue)
+	document.addEventListener('visibilitychange', handlePageActivityChange)
+	window.addEventListener('focus', handlePageActivityChange)
+	window.addEventListener('blur', handlePageActivityChange)
+	syncLiveRefreshTimer()
 	void loadSessionState()
 })
 
 onBeforeUnmount(() => {
 	window.removeEventListener('resize', syncRequestLogScrollCue)
+	document.removeEventListener('visibilitychange', handlePageActivityChange)
+	window.removeEventListener('focus', handlePageActivityChange)
+	window.removeEventListener('blur', handlePageActivityChange)
+	stopLiveRefreshTimer()
 })
 </script>
 
@@ -1695,16 +1858,31 @@ onBeforeUnmount(() => {
 						</div>
 
 						<div v-else class="relative">
-							<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto pb-8 pr-1 pt-1" @scroll="syncRequestLogScrollCue">
-								<RequestLogCard v-for="requestLog in requestLogs" :key="requestLog.id" :request-log="requestLog" />
+							<div class="relative overflow-hidden rounded-card">
+								<div v-if="showRequestLogTopGlow" class="pointer-events-none absolute inset-x-0 top-0 z-10 h-6">
+									<div class="absolute inset-x-0 top-0 h-px bg-[rgba(24,34,47,0.06)]" />
+									<div class="absolute inset-x-4 -top-3.5 h-9 rounded-full bg-line-strong opacity-70 blur-md" />
+									<div
+										class="absolute inset-x-0 top-0 h-6 bg-linear-to-b from-[rgba(24,34,47,0.06)] via-[rgba(24,34,47,0.025)] to-transparent"
+									/>
+								</div>
+								<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto px-1 pb-8 pt-1" @scroll="syncRequestLogScrollCue">
+									<RequestLogCard
+										v-for="requestLog in requestLogs"
+										:key="requestLog.id"
+										:page-active="isPageActive"
+										:request-log="requestLog"
+										:load-request-log-detail="loadRequestLogDetail"
+									/>
+								</div>
+								<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-18">
+									<div class="absolute inset-x-4 -bottom-4 h-10 rounded-full bg-surface-strong opacity-95 blur-md" />
+									<div class="absolute inset-x-0 bottom-0 h-18 bg-linear-to-t from-surface via-[rgba(255,252,247,0.5)] to-transparent" />
+								</div>
 							</div>
-							<div
-								v-if="showRequestLogScrollCue"
-								class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-18 rounded-b-card bg-linear-to-t from-surface-strong via-[rgba(255,252,247,0.74)] to-transparent"
-							/>
 							<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
 								<div
-									class="inline-flex items-center gap-2 rounded-full border border-line bg-[rgba(255,252,247,0.92)] px-3 py-1.5 text-[0.74rem] font-bold uppercase tracking-[0.16em] text-accent shadow-[0_10px_20px_rgba(24,34,47,0.08)] backdrop-blur-sm"
+									class="inline-flex items-center gap-2 rounded-full border border-line bg-[rgba(255,252,247,0.92)] px-3 py-1.5 text-[0.74rem] font-bold uppercase tracking-widest text-accent shadow-[0_10px_20px_rgba(24,34,47,0.08)] backdrop-blur-sm"
 								>
 									<ChevronsDown class="size-4" />
 									Scroll for more

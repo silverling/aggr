@@ -165,6 +165,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("PUT /api/model-disable-rules", s.handleSetModelDisableRule)
 	mux.HandleFunc("GET /api/stats", s.handleGetRequestStats)
 	mux.HandleFunc("GET /api/requests", s.handleListProxyRequests)
+	mux.HandleFunc("GET /api/requests/{id}", s.handleGetProxyRequest)
 	mux.HandleFunc("DELETE /api/requests", s.handleDeleteProxyRequests)
 	mux.HandleFunc("GET /v1/models", s.handleListOpenAIModels)
 	mux.HandleFunc("/v1/", s.handleProxyOpenAI)
@@ -488,10 +489,11 @@ func (s *server) handleGetRequestStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-// handleListProxyRequests returns the recent OpenAI gateway request audit log.
+// handleListProxyRequests returns the recent OpenAI gateway request audit log
+// in a compact summary shape suitable for the scrolling dashboard feed.
 func (s *server) handleListProxyRequests(w http.ResponseWriter, r *http.Request) {
 	limit := normalizeProxyRequestLogLimit(r.URL.Query().Get("limit"))
-	requests, err := s.store.listProxyRequestLogViews(r.Context(), limit)
+	requests, err := s.store.listProxyRequestLogSummaryViews(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -500,6 +502,29 @@ func (s *server) handleListProxyRequests(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"requests": requests,
 	})
+}
+
+// handleGetProxyRequest returns one full OpenAI gateway request audit record
+// so the dashboard can inspect headers and bodies on demand.
+func (s *server) handleGetProxyRequest(w http.ResponseWriter, r *http.Request) {
+	id, err := parseProxyRequestLogID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	request, err := s.store.getProxyRequestLogView(r.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, errProxyRequestLogNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, request)
 }
 
 // handleDeleteProxyRequests removes request audit rows that match the provided
@@ -1013,6 +1038,16 @@ func parseModelAliasID(raw string) (int64, error) {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, fmt.Errorf("invalid model alias id %q", raw)
+	}
+	return id, nil
+}
+
+// parseProxyRequestLogID converts a path parameter into a positive request-log
+// identifier used by the detailed audit inspector endpoint.
+func parseProxyRequestLogID(raw string) (int64, error) {
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid proxy request log id %q", raw)
 	}
 	return id, nil
 }

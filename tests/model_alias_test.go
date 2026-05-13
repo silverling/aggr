@@ -181,14 +181,22 @@ func TestModelAliasesRouteAndRewriteRequests(t *testing.T) {
 	if chatLog.ProviderName != "Secondary" {
 		t.Fatalf("chat log provider name = %q, want %q", chatLog.ProviderName, "Secondary")
 	}
-	if !strings.Contains(chatLog.ReceivedRequest.Body, `"model":"team-gateway"`) {
-		t.Fatalf("chat log received request body = %q, want alias model id", chatLog.ReceivedRequest.Body)
+	if chatLog.Method != http.MethodPost {
+		t.Fatalf("chat log method = %q, want %q", chatLog.Method, http.MethodPost)
 	}
-	if chatLog.SentRequest == nil {
+	if chatLog.Status != http.StatusOK {
+		t.Fatalf("chat log status = %d, want %d", chatLog.Status, http.StatusOK)
+	}
+
+	chatLogDetail := loadTestProxyRequestLog(t, client, gatewayURL, chatLog.ID)
+	if !strings.Contains(chatLogDetail.ReceivedRequest.Body, `"model":"team-gateway"`) {
+		t.Fatalf("chat log received request body = %q, want alias model id", chatLogDetail.ReceivedRequest.Body)
+	}
+	if chatLogDetail.SentRequest == nil {
 		t.Fatalf("chat log sent request = nil, want populated upstream request")
 	}
-	if !strings.Contains(chatLog.SentRequest.Body, `"model":"gpt-4.1"`) {
-		t.Fatalf("chat log sent request body = %q, want target model id", chatLog.SentRequest.Body)
+	if !strings.Contains(chatLogDetail.SentRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("chat log sent request body = %q, want target model id", chatLogDetail.SentRequest.Body)
 	}
 
 	doJSONRequest(
@@ -274,11 +282,11 @@ func containsOpenAIModel(models []testOpenAIModel, targetID string, wantProvider
 	return false
 }
 
-// findRequestLogByPath returns the newest request-log record that matches the
+// findRequestLogByPath returns the newest request-log summary that matches the
 // requested inbound path.
-func findRequestLogByPath(logs []testProxyRequestLog, targetPath string) *testProxyRequestLog {
+func findRequestLogByPath(logs []testProxyRequestLogSummary, targetPath string) *testProxyRequestLogSummary {
 	for index := range logs {
-		if logs[index].ReceivedRequest.Path == targetPath {
+		if logs[index].Path == targetPath {
 			return &logs[index]
 		}
 	}

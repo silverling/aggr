@@ -13,11 +13,12 @@ import (
 )
 
 var (
-	errProviderNotFound      = errors.New("provider not found")
-	errProviderModelNotFound = errors.New("provider does not serve model")
-	errModelAliasNotFound    = errors.New("model alias not found")
-	errModelAliasConflict    = errors.New("model alias conflict")
-	errModelAliasTarget      = errors.New("model alias target is not routable")
+	errProviderNotFound        = errors.New("provider not found")
+	errProviderModelNotFound   = errors.New("provider does not serve model")
+	errModelAliasNotFound      = errors.New("model alias not found")
+	errModelAliasConflict      = errors.New("model alias conflict")
+	errModelAliasTarget        = errors.New("model alias target is not routable")
+	errProxyRequestLogNotFound = errors.New("proxy request log not found")
 )
 
 // providerRecord is the internal database representation of a configured provider.
@@ -204,6 +205,44 @@ type proxyRequestReceivedResponseView struct {
 	Error string `json:"error,omitempty"`
 }
 
+// proxyRequestLogSummaryRecord is the lightweight database representation used
+// by the request-log list endpoint and the stats queries so those code paths do
+// not have to read large stored header and body payloads.
+type proxyRequestLogSummaryRecord struct {
+	// ID is the audit row primary key.
+	ID int64
+	// ProviderID is the provider selected for the request, if any.
+	ProviderID sql.NullInt64
+	// ProviderName is the provider label captured at request time.
+	ProviderName string
+	// ModelID is the OpenAI model identifier that routed the request.
+	ModelID string
+	// Method is the inbound HTTP method.
+	Method string
+	// Path is the inbound request path.
+	Path string
+	// RawQuery is the raw query string from the inbound request.
+	RawQuery string
+	// ResponseStatus is the final status code returned to the caller.
+	ResponseStatus sql.NullInt64
+	// ErrorText stores the final error message, if the request failed.
+	ErrorText string
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS sql.NullInt64
+	// CachedInputTokens stores the input tokens served from cache.
+	CachedInputTokens int64
+	// NonCachedInputTokens stores the input tokens that were not cached.
+	NonCachedInputTokens int64
+	// OutputTokens stores the generated output tokens.
+	OutputTokens int64
+	// TotalTokens stores the sum of input and output tokens.
+	TotalTokens int64
+	// RequestedAt records when the request log row was created.
+	RequestedAt time.Time
+	// CompletedAt records when the request log row was finalized.
+	CompletedAt sql.NullTime
+}
+
 // proxyRequestLogRecord is the internal database representation of one audited
 // gateway request and its recorded upstream response.
 type proxyRequestLogRecord struct {
@@ -249,13 +288,60 @@ type proxyRequestLogRecord struct {
 	ErrorText string
 	// DurationMS stores the elapsed time in milliseconds.
 	DurationMS sql.NullInt64
+	// CachedInputTokens stores the input tokens served from cache.
+	CachedInputTokens int64
+	// NonCachedInputTokens stores the input tokens that were not cached.
+	NonCachedInputTokens int64
+	// OutputTokens stores the generated output tokens.
+	OutputTokens int64
+	// TotalTokens stores the sum of input and output tokens.
+	TotalTokens int64
 	// RequestedAt records when the request log row was created.
 	RequestedAt time.Time
 	// CompletedAt records when the request log row was finalized.
 	CompletedAt sql.NullTime
 }
 
-// proxyRequestLogView is the JSON payload returned to the dashboard inspector.
+// proxyRequestLogSummaryView is the compact JSON payload returned by the
+// request-log list endpoint so the dashboard can render the audit feed without
+// downloading full request and response bodies for every row.
+type proxyRequestLogSummaryView struct {
+	// ID is the audit row primary key.
+	ID int64 `json:"id"`
+	// ProviderID is the provider selected for the request, if any.
+	ProviderID int64 `json:"providerId,omitempty"`
+	// ProviderName is the provider label captured at request time.
+	ProviderName string `json:"providerName,omitempty"`
+	// ModelID is the OpenAI model identifier that routed the request.
+	ModelID string `json:"modelId,omitempty"`
+	// Method is the inbound HTTP verb.
+	Method string `json:"method"`
+	// Path is the inbound request path.
+	Path string `json:"path"`
+	// RawQuery is the inbound request query string.
+	RawQuery string `json:"rawQuery,omitempty"`
+	// Status is the final HTTP status returned to the caller.
+	Status int `json:"status,omitempty"`
+	// Error stores the final error message, if the request failed.
+	Error string `json:"error,omitempty"`
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS int64 `json:"durationMs,omitempty"`
+	// CachedInputTokens stores the input tokens served from cache.
+	CachedInputTokens int64 `json:"cachedInputTokens"`
+	// NonCachedInputTokens stores the input tokens that were not cached.
+	NonCachedInputTokens int64 `json:"nonCachedInputTokens"`
+	// OutputTokens stores the generated output tokens.
+	OutputTokens int64 `json:"outputTokens"`
+	// TotalTokens stores the sum of input and output tokens.
+	TotalTokens int64 `json:"totalTokens"`
+	// RequestedAt records when the request log row was created.
+	RequestedAt string `json:"requestedAt"`
+	// CompletedAt records when the request log row was finalized.
+	CompletedAt string `json:"completedAt,omitempty"`
+}
+
+// proxyRequestLogView is the detailed JSON payload returned by the single-log
+// inspector endpoint for one audited request record.
 type proxyRequestLogView struct {
 	// ID is the audit row primary key.
 	ID int64 `json:"id"`
@@ -273,6 +359,14 @@ type proxyRequestLogView struct {
 	ReceivedResponse proxyRequestReceivedResponseView `json:"receivedResponse"`
 	// DurationMS stores the elapsed time in milliseconds.
 	DurationMS int64 `json:"durationMs,omitempty"`
+	// CachedInputTokens stores the input tokens served from cache.
+	CachedInputTokens int64 `json:"cachedInputTokens"`
+	// NonCachedInputTokens stores the input tokens that were not cached.
+	NonCachedInputTokens int64 `json:"nonCachedInputTokens"`
+	// OutputTokens stores the generated output tokens.
+	OutputTokens int64 `json:"outputTokens"`
+	// TotalTokens stores the sum of input and output tokens.
+	TotalTokens int64 `json:"totalTokens"`
 	// RequestedAt records when the request log row was created.
 	RequestedAt string `json:"requestedAt"`
 	// CompletedAt records when the request log row was finalized.
@@ -529,6 +623,10 @@ func (s *store) migrate(ctx context.Context) error {
 			response_body_truncated INTEGER NOT NULL DEFAULT 0,
 			error_text TEXT,
 			duration_ms INTEGER,
+			cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+			non_cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
 			requested_at TEXT NOT NULL,
 			completed_at TEXT,
 			FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE SET NULL
@@ -548,6 +646,9 @@ func (s *store) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := s.ensureProxyRequestSentRequestColumns(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureProxyRequestTokenColumns(ctx); err != nil {
 		return err
 	}
 	if err := s.ensureAuthTables(ctx); err != nil {
@@ -661,6 +762,160 @@ func (s *store) ensureProxyRequestSentRequestColumns(ctx context.Context) error 
 		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN sent_request_body_truncated INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("add proxy request sent_body_truncated column: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// ensureProxyRequestTokenColumns adds the persisted token-usage columns for
+// audited requests and backfills older rows that predate the schema change.
+func (s *store) ensureProxyRequestTokenColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(proxy_request_logs)`)
+	if err != nil {
+		return fmt.Errorf("inspect proxy request token schema: %w", err)
+	}
+	defer rows.Close()
+
+	hasCachedInputTokens := false
+	hasNonCachedInputTokens := false
+	hasOutputTokens := false
+	hasTotalTokens := false
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return fmt.Errorf("scan proxy request token schema: %w", err)
+		}
+		switch name {
+		case "cached_input_tokens":
+			hasCachedInputTokens = true
+		case "non_cached_input_tokens":
+			hasNonCachedInputTokens = true
+		case "output_tokens":
+			hasOutputTokens = true
+		case "total_tokens":
+			hasTotalTokens = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate proxy request token schema: %w", err)
+	}
+
+	if !hasCachedInputTokens {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN cached_input_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add proxy request cached_input_tokens column: %w", err)
+		}
+	}
+	if !hasNonCachedInputTokens {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN non_cached_input_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add proxy request non_cached_input_tokens column: %w", err)
+		}
+	}
+	if !hasOutputTokens {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add proxy request output_tokens column: %w", err)
+		}
+	}
+	if !hasTotalTokens {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE proxy_request_logs ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add proxy request total_tokens column: %w", err)
+		}
+	}
+
+	if err := s.backfillProxyRequestTokenColumns(ctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// backfillProxyRequestTokenColumns parses stored response bodies for legacy
+// completed audit rows whose persisted token counters have not been populated
+// yet and writes the derived counts into the new columns.
+func (s *store) backfillProxyRequestTokenColumns(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, response_headers, response_body
+		FROM proxy_request_logs
+		WHERE completed_at IS NOT NULL
+			AND cached_input_tokens = 0
+			AND non_cached_input_tokens = 0
+			AND output_tokens = 0
+			AND total_tokens = 0
+			AND (response_headers IS NOT NULL OR response_body IS NOT NULL)
+	`)
+	if err != nil {
+		return fmt.Errorf("query proxy request token backfill rows: %w", err)
+	}
+	defer rows.Close()
+
+	type proxyRequestTokenBackfillRow struct {
+		// ID is the audit row that needs persisted token counters.
+		ID int64
+		// ResponseHeaders stores the serialized response headers used to detect SSE payloads.
+		ResponseHeaders string
+		// ResponseBody stores the captured response payload used to derive token counts.
+		ResponseBody string
+	}
+	backfillRows := make([]proxyRequestTokenBackfillRow, 0)
+
+	for rows.Next() {
+		var (
+			id              int64
+			responseHeaders sql.NullString
+			responseBody    sql.NullString
+		)
+		if err := rows.Scan(&id, &responseHeaders, &responseBody); err != nil {
+			return fmt.Errorf("scan proxy request token backfill row: %w", err)
+		}
+		backfillRows = append(backfillRows, proxyRequestTokenBackfillRow{
+			ID:              id,
+			ResponseHeaders: responseHeaders.String,
+			ResponseBody:    responseBody.String,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate proxy request token backfill rows: %w", err)
+	}
+	if len(backfillRows) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin proxy request token backfill: %w", err)
+	}
+
+	statement, err := tx.PrepareContext(ctx, `
+		UPDATE proxy_request_logs
+		SET cached_input_tokens = ?, non_cached_input_tokens = ?, output_tokens = ?, total_tokens = ?
+		WHERE id = ?
+	`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("prepare proxy request token backfill: %w", err)
+	}
+	defer statement.Close()
+
+	for _, row := range backfillRows {
+		usage, ok := extractRequestTokenUsage(row.ResponseHeaders, row.ResponseBody)
+		if !ok {
+			continue
+		}
+
+		if _, err := statement.ExecContext(ctx, usage.CachedInputTokens, usage.NonCachedInputTokens, usage.OutputTokens, usage.InputTokens+usage.OutputTokens, row.ID); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("update proxy request token backfill row: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit proxy request token backfill: %w", err)
 	}
 
 	return nil
@@ -929,13 +1184,25 @@ func (s *store) createProxyRequestLog(ctx context.Context, entry proxyRequestLog
 
 // completeProxyRequestLog finalizes a request audit record with the response metadata.
 func (s *store) completeProxyRequestLog(ctx context.Context, id int64, update proxyRequestLogUpdate) error {
+	usage, ok := extractRequestTokenUsage(update.ResponseHeaders, update.ResponseBody)
+	cachedInputTokens := int64(0)
+	nonCachedInputTokens := int64(0)
+	outputTokens := int64(0)
+	totalTokens := int64(0)
+	if ok {
+		cachedInputTokens = usage.CachedInputTokens
+		nonCachedInputTokens = usage.NonCachedInputTokens
+		outputTokens = usage.OutputTokens
+		totalTokens = usage.InputTokens + usage.OutputTokens
+	}
+
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE proxy_request_logs
 		SET provider_id = ?, provider_name = ?, sent_request_method = ?, sent_request_url = ?, sent_request_headers = ?, sent_request_body = ?, sent_request_body_truncated = ?,
 			response_status = ?, response_headers = ?, response_body = ?,
-			response_body_truncated = ?, error_text = ?, duration_ms = ?, completed_at = ?
+			response_body_truncated = ?, error_text = ?, duration_ms = ?, cached_input_tokens = ?, non_cached_input_tokens = ?, output_tokens = ?, total_tokens = ?, completed_at = ?
 		WHERE id = ?
-	`, nullableInt64(update.ProviderID), update.ProviderName, update.SentMethod, update.SentURL, update.SentHeaders, update.SentBody, boolToInt(update.SentBodyTruncated), update.ResponseStatus, update.ResponseHeaders, update.ResponseBody, boolToInt(update.ResponseBodyTruncated), update.ErrorText, update.DurationMS, update.CompletedAt.UTC().Format(time.RFC3339), id)
+	`, nullableInt64(update.ProviderID), update.ProviderName, update.SentMethod, update.SentURL, update.SentHeaders, update.SentBody, boolToInt(update.SentBodyTruncated), update.ResponseStatus, update.ResponseHeaders, update.ResponseBody, boolToInt(update.ResponseBodyTruncated), update.ErrorText, update.DurationMS, cachedInputTokens, nonCachedInputTokens, outputTokens, totalTokens, update.CompletedAt.UTC().Format(time.RFC3339), id)
 	if err != nil {
 		return fmt.Errorf("update proxy request log: %w", err)
 	}
@@ -983,47 +1250,48 @@ func (s *store) deleteProxyRequestLogs(ctx context.Context, providerID *int64, f
 	return affected, nil
 }
 
-// listProxyRequestLogs returns recent request audit rows ordered from newest to oldest.
-func (s *store) listProxyRequestLogs(ctx context.Context, limit int) ([]proxyRequestLogRecord, error) {
+// listProxyRequestLogSummaries returns recent request audit rows ordered from
+// newest to oldest without loading the stored request and response bodies.
+func (s *store) listProxyRequestLogSummaries(ctx context.Context, limit int) ([]proxyRequestLogSummaryRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			id, provider_id, provider_name, model_id, method, path, raw_query,
-			request_headers, request_body, request_body_truncated,
-			sent_request_method, sent_request_url, sent_request_headers, sent_request_body, sent_request_body_truncated,
-			response_status, response_headers, response_body, response_body_truncated,
-			error_text, duration_ms, requested_at, completed_at
+			response_status, error_text, duration_ms,
+			cached_input_tokens, non_cached_input_tokens, output_tokens, total_tokens,
+			requested_at, completed_at
 		FROM proxy_request_logs
 		ORDER BY requested_at DESC, id DESC
 		LIMIT ?
 	`, limit)
 	if err != nil {
-		return nil, fmt.Errorf("query proxy request logs: %w", err)
+		return nil, fmt.Errorf("query proxy request log summaries: %w", err)
 	}
 	defer rows.Close()
 
-	logs := make([]proxyRequestLogRecord, 0, limit)
+	logs := make([]proxyRequestLogSummaryRecord, 0, limit)
 	for rows.Next() {
-		record, err := scanProxyRequestLog(rows)
+		record, err := scanProxyRequestLogSummary(rows)
 		if err != nil {
 			return nil, err
 		}
 		logs = append(logs, record)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate proxy request logs: %w", err)
+		return nil, fmt.Errorf("iterate proxy request log summaries: %w", err)
 	}
 
 	return logs, nil
 }
 
-// listProxyRequestLogViews returns recent request audit rows in a JSON-friendly shape.
-func (s *store) listProxyRequestLogViews(ctx context.Context, limit int) ([]proxyRequestLogView, error) {
-	logs, err := s.listProxyRequestLogs(ctx, limit)
+// listProxyRequestLogSummaryViews returns recent request audit rows in the
+// compact JSON shape used by the dashboard list view.
+func (s *store) listProxyRequestLogSummaryViews(ctx context.Context, limit int) ([]proxyRequestLogSummaryView, error) {
+	logs, err := s.listProxyRequestLogSummaries(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	views := make([]proxyRequestLogView, 0, len(logs))
+	views := make([]proxyRequestLogSummaryView, 0, len(logs))
 	for _, log := range logs {
 		views = append(views, log.toView())
 	}
@@ -1031,9 +1299,47 @@ func (s *store) listProxyRequestLogViews(ctx context.Context, limit int) ([]prox
 	return views, nil
 }
 
-// listProxyRequestLogsBetween returns audited request rows whose requested-at
-// timestamp falls within the provided inclusive range.
-func (s *store) listProxyRequestLogsBetween(ctx context.Context, from *time.Time, to time.Time) ([]proxyRequestLogRecord, error) {
+// getProxyRequestLog loads one full request audit row, including the stored
+// request and response bodies needed by the detailed inspector view.
+func (s *store) getProxyRequestLog(ctx context.Context, id int64) (proxyRequestLogRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			id, provider_id, provider_name, model_id, method, path, raw_query,
+			request_headers, request_body, request_body_truncated,
+			sent_request_method, sent_request_url, sent_request_headers, sent_request_body, sent_request_body_truncated,
+			response_status, response_headers, response_body, response_body_truncated,
+			error_text, duration_ms, cached_input_tokens, non_cached_input_tokens, output_tokens, total_tokens,
+			requested_at, completed_at
+		FROM proxy_request_logs
+		WHERE id = ?
+	`, id)
+
+	record, err := scanProxyRequestLog(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return proxyRequestLogRecord{}, errProxyRequestLogNotFound
+		}
+		return proxyRequestLogRecord{}, err
+	}
+
+	return record, nil
+}
+
+// getProxyRequestLogView returns one full request audit row in the JSON shape
+// used by the detailed inspector panel.
+func (s *store) getProxyRequestLogView(ctx context.Context, id int64) (proxyRequestLogView, error) {
+	record, err := s.getProxyRequestLog(ctx, id)
+	if err != nil {
+		return proxyRequestLogView{}, err
+	}
+
+	return record.toView(), nil
+}
+
+// listProxyRequestLogSummariesBetween returns audited request rows whose
+// requested-at timestamp falls within the provided inclusive range without
+// loading the persisted request and response bodies.
+func (s *store) listProxyRequestLogSummariesBetween(ctx context.Context, from *time.Time, to time.Time) ([]proxyRequestLogSummaryRecord, error) {
 	clauses := []string{"requested_at <= ?"}
 	args := []any{to.UTC().Format(time.RFC3339)}
 	if from != nil {
@@ -1044,10 +1350,9 @@ func (s *store) listProxyRequestLogsBetween(ctx context.Context, from *time.Time
 	query := fmt.Sprintf(`
 		SELECT
 			id, provider_id, provider_name, model_id, method, path, raw_query,
-			request_headers, request_body, request_body_truncated,
-			sent_request_method, sent_request_url, sent_request_headers, sent_request_body, sent_request_body_truncated,
-			response_status, response_headers, response_body, response_body_truncated,
-			error_text, duration_ms, requested_at, completed_at
+			response_status, error_text, duration_ms,
+			cached_input_tokens, non_cached_input_tokens, output_tokens, total_tokens,
+			requested_at, completed_at
 		FROM proxy_request_logs
 		WHERE %s
 		ORDER BY requested_at ASC, id ASC
@@ -1055,20 +1360,20 @@ func (s *store) listProxyRequestLogsBetween(ctx context.Context, from *time.Time
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query proxy request logs by range: %w", err)
+		return nil, fmt.Errorf("query proxy request log summaries by range: %w", err)
 	}
 	defer rows.Close()
 
-	logs := make([]proxyRequestLogRecord, 0)
+	logs := make([]proxyRequestLogSummaryRecord, 0)
 	for rows.Next() {
-		record, err := scanProxyRequestLog(rows)
+		record, err := scanProxyRequestLogSummary(rows)
 		if err != nil {
 			return nil, err
 		}
 		logs = append(logs, record)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate proxy request logs by range: %w", err)
+		return nil, fmt.Errorf("iterate proxy request log summaries by range: %w", err)
 	}
 
 	return logs, nil
@@ -1096,7 +1401,7 @@ func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow,
 		location = time.UTC
 	}
 
-	summaryLogs, err := s.listProxyRequestLogsBetween(ctx, window.From, now)
+	summaryLogs, err := s.listProxyRequestLogSummariesBetween(ctx, window.From, now)
 	if err != nil {
 		return requestStatsView{}, err
 	}
@@ -1110,13 +1415,13 @@ func (s *store) listRequestStats(ctx context.Context, window requestStatsWindow,
 
 	localNow := now.In(location)
 	dailyStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location).AddDate(0, 0, -6)
-	dailyLogs, err := s.listProxyRequestLogsBetween(ctx, &dailyStart, now)
+	dailyLogs, err := s.listProxyRequestLogSummariesBetween(ctx, &dailyStart, now)
 	if err != nil {
 		return requestStatsView{}, err
 	}
 
 	hourlyStart := localNow.Truncate(time.Hour).Add(-11 * time.Hour)
-	hourlyLogs, err := s.listProxyRequestLogsBetween(ctx, &hourlyStart, now)
+	hourlyLogs, err := s.listProxyRequestLogSummariesBetween(ctx, &hourlyStart, now)
 	if err != nil {
 		return requestStatsView{}, err
 	}
@@ -1716,7 +2021,64 @@ func (s *store) listDisabledModelsForProvider(ctx context.Context, providerID in
 	return modelIDs, nil
 }
 
-// scanProxyRequestLog reads a proxy request audit row from either a query row or iterator.
+// scanProxyRequestLogSummary reads a lightweight proxy request audit row from
+// either a query row or iterator.
+func scanProxyRequestLogSummary(scanner interface {
+	Scan(dest ...any) error
+}) (proxyRequestLogSummaryRecord, error) {
+	var record proxyRequestLogSummaryRecord
+	var (
+		responseStatus sql.NullInt64
+		errorText      sql.NullString
+		durationMS     sql.NullInt64
+		requestedAtRaw string
+		completedAtRaw sql.NullString
+	)
+
+	if err := scanner.Scan(
+		&record.ID,
+		&record.ProviderID,
+		&record.ProviderName,
+		&record.ModelID,
+		&record.Method,
+		&record.Path,
+		&record.RawQuery,
+		&responseStatus,
+		&errorText,
+		&durationMS,
+		&record.CachedInputTokens,
+		&record.NonCachedInputTokens,
+		&record.OutputTokens,
+		&record.TotalTokens,
+		&requestedAtRaw,
+		&completedAtRaw,
+	); err != nil {
+		return proxyRequestLogSummaryRecord{}, err
+	}
+
+	record.ResponseStatus = responseStatus
+	record.ErrorText = errorText.String
+	record.DurationMS = durationMS
+
+	requestedAt, err := time.Parse(time.RFC3339, requestedAtRaw)
+	if err != nil {
+		return proxyRequestLogSummaryRecord{}, fmt.Errorf("parse proxy request summary requested_at: %w", err)
+	}
+	record.RequestedAt = requestedAt
+
+	if completedAtRaw.Valid {
+		parsed, err := time.Parse(time.RFC3339, completedAtRaw.String)
+		if err != nil {
+			return proxyRequestLogSummaryRecord{}, fmt.Errorf("parse proxy request summary completed_at: %w", err)
+		}
+		record.CompletedAt = sql.NullTime{Time: parsed, Valid: true}
+	}
+
+	return record, nil
+}
+
+// scanProxyRequestLog reads a proxy request audit row from either a query row
+// or iterator.
 func scanProxyRequestLog(scanner interface {
 	Scan(dest ...any) error
 }) (proxyRequestLogRecord, error) {
@@ -1725,7 +2087,10 @@ func scanProxyRequestLog(scanner interface {
 		requestBodyTruncated  int
 		sentBodyTruncated     int
 		responseStatus        sql.NullInt64
+		responseHeaders       sql.NullString
+		responseBody          sql.NullString
 		responseBodyTruncated int
+		errorText             sql.NullString
 		durationMS            sql.NullInt64
 		requestedAtRaw        string
 		completedAtRaw        sql.NullString
@@ -1748,11 +2113,15 @@ func scanProxyRequestLog(scanner interface {
 		&record.SentBody,
 		&sentBodyTruncated,
 		&responseStatus,
-		&record.ResponseHeaders,
-		&record.ResponseBody,
+		&responseHeaders,
+		&responseBody,
 		&responseBodyTruncated,
-		&record.ErrorText,
+		&errorText,
 		&durationMS,
+		&record.CachedInputTokens,
+		&record.NonCachedInputTokens,
+		&record.OutputTokens,
+		&record.TotalTokens,
 		&requestedAtRaw,
 		&completedAtRaw,
 	); err != nil {
@@ -1762,7 +2131,10 @@ func scanProxyRequestLog(scanner interface {
 	record.RequestBodyTruncated = requestBodyTruncated == 1
 	record.SentBodyTruncated = sentBodyTruncated == 1
 	record.ResponseStatus = responseStatus
+	record.ResponseHeaders = responseHeaders.String
+	record.ResponseBody = responseBody.String
 	record.ResponseBodyTruncated = responseBodyTruncated == 1
+	record.ErrorText = errorText.String
 	record.DurationMS = durationMS
 
 	requestedAt, err := time.Parse(time.RFC3339, requestedAtRaw)
@@ -1912,12 +2284,49 @@ func (record modelAliasRecord) toView(providers []routeProviderView) modelAliasV
 	return view
 }
 
+// toView converts the lightweight audit record into the compact JSON payload
+// used by the request-log list endpoint.
+func (record proxyRequestLogSummaryRecord) toView() proxyRequestLogSummaryView {
+	view := proxyRequestLogSummaryView{
+		ID:                   record.ID,
+		ProviderName:         record.ProviderName,
+		ModelID:              record.ModelID,
+		Method:               record.Method,
+		Path:                 record.Path,
+		RawQuery:             record.RawQuery,
+		Error:                record.ErrorText,
+		CachedInputTokens:    record.CachedInputTokens,
+		NonCachedInputTokens: record.NonCachedInputTokens,
+		OutputTokens:         record.OutputTokens,
+		TotalTokens:          record.TotalTokens,
+		RequestedAt:          record.RequestedAt.UTC().Format(time.RFC3339),
+	}
+	if record.ProviderID.Valid {
+		view.ProviderID = record.ProviderID.Int64
+	}
+	if record.ResponseStatus.Valid {
+		view.Status = int(record.ResponseStatus.Int64)
+	}
+	if record.DurationMS.Valid {
+		view.DurationMS = record.DurationMS.Int64
+	}
+	if record.CompletedAt.Valid {
+		view.CompletedAt = record.CompletedAt.Time.UTC().Format(time.RFC3339)
+	}
+
+	return view
+}
+
 // toView converts the internal audit record into the JSON payload used by the UI.
 func (record proxyRequestLogRecord) toView() proxyRequestLogView {
 	view := proxyRequestLogView{
-		ID:           record.ID,
-		ProviderName: record.ProviderName,
-		ModelID:      record.ModelID,
+		ID:                   record.ID,
+		ProviderName:         record.ProviderName,
+		ModelID:              record.ModelID,
+		CachedInputTokens:    record.CachedInputTokens,
+		NonCachedInputTokens: record.NonCachedInputTokens,
+		OutputTokens:         record.OutputTokens,
+		TotalTokens:          record.TotalTokens,
 		ReceivedRequest: proxyRequestReceivedRequestView{
 			Method:        record.Method,
 			Path:          record.Path,
@@ -1961,7 +2370,7 @@ func (record proxyRequestLogRecord) toView() proxyRequestLogView {
 
 // summarizeRequestLogs reduces a slice of audited request records into the
 // top-line counts shown in the stats dashboard.
-func summarizeRequestLogs(logs []proxyRequestLogRecord) requestStatsSummaryView {
+func summarizeRequestLogs(logs []proxyRequestLogSummaryRecord) requestStatsSummaryView {
 	summary := requestStatsSummaryView{}
 	for _, log := range logs {
 		summary.Requests++
@@ -1980,7 +2389,7 @@ func summarizeRequestLogs(logs []proxyRequestLogRecord) requestStatsSummaryView 
 
 // buildDailyRequestStatsBuckets aggregates logs into 7 calendar-day buckets
 // starting at the provided local midnight in the selected chart timezone.
-func buildDailyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time, location *time.Location) []requestStatsBucketView {
+func buildDailyRequestStatsBuckets(logs []proxyRequestLogSummaryRecord, start time.Time, location *time.Location) []requestStatsBucketView {
 	if location == nil {
 		location = time.UTC
 	}
@@ -2001,7 +2410,7 @@ func buildDailyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time
 
 // buildHourlyRequestStatsBuckets aggregates logs into 12 hourly buckets
 // starting at the provided local hour boundary in the selected chart timezone.
-func buildHourlyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Time, location *time.Location) []requestStatsBucketView {
+func buildHourlyRequestStatsBuckets(logs []proxyRequestLogSummaryRecord, start time.Time, location *time.Location) []requestStatsBucketView {
 	if location == nil {
 		location = time.UTC
 	}
@@ -2021,7 +2430,7 @@ func buildHourlyRequestStatsBuckets(logs []proxyRequestLogRecord, start time.Tim
 }
 
 // applyRequestLogsToBuckets updates the matching bucket for each audited request.
-func applyRequestLogsToBuckets(frames []requestStatsBucketFrame, logs []proxyRequestLogRecord, location *time.Location) {
+func applyRequestLogsToBuckets(frames []requestStatsBucketFrame, logs []proxyRequestLogSummaryRecord, location *time.Location) {
 	if location == nil {
 		location = time.UTC
 	}
@@ -2073,7 +2482,7 @@ func requestStatsBucketFramesToViews(frames []requestStatsBucketFrame) []request
 }
 
 // applyRequestLogOutcome updates success and failure counters for one audited request.
-func applyRequestLogOutcome(succeeded *int64, failed *int64, log proxyRequestLogRecord) {
+func applyRequestLogOutcome(succeeded *int64, failed *int64, log proxyRequestLogSummaryRecord) {
 	if !log.CompletedAt.Valid {
 		return
 	}
@@ -2086,18 +2495,13 @@ func applyRequestLogOutcome(succeeded *int64, failed *int64, log proxyRequestLog
 	*failed = *failed + 1
 }
 
-// applyRequestLogUsage adds the parsed token usage from one audited response to
-// the provided running totals.
-func applyRequestLogUsage(consumedTokens *int64, cachedInputTokens *int64, nonCachedInputTokens *int64, outputTokens *int64, log proxyRequestLogRecord) {
-	usage, ok := extractRequestTokenUsage(log.ResponseHeaders, log.ResponseBody)
-	if !ok {
-		return
-	}
-
-	*consumedTokens += usage.InputTokens + usage.OutputTokens
-	*cachedInputTokens += usage.CachedInputTokens
-	*nonCachedInputTokens += usage.NonCachedInputTokens
-	*outputTokens += usage.OutputTokens
+// applyRequestLogUsage adds the persisted token counters from one audited
+// response to the provided running totals.
+func applyRequestLogUsage(consumedTokens *int64, cachedInputTokens *int64, nonCachedInputTokens *int64, outputTokens *int64, log proxyRequestLogSummaryRecord) {
+	*consumedTokens += log.TotalTokens
+	*cachedInputTokens += log.CachedInputTokens
+	*nonCachedInputTokens += log.NonCachedInputTokens
+	*outputTokens += log.OutputTokens
 }
 
 // extractRequestTokenUsage parses one audited response body using the persisted

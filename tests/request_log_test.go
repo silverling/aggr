@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/silverling/aggr/server"
@@ -75,7 +76,44 @@ type testProviderView struct {
 // testProxyRequestsResponse mirrors the recent request-log list payload.
 type testProxyRequestsResponse struct {
 	// Requests contains the most recent audited gateway requests.
-	Requests []testProxyRequestLog `json:"requests"`
+	Requests []testProxyRequestLogSummary `json:"requests"`
+}
+
+// testProxyRequestLogSummary mirrors the lightweight request-log list payload
+// returned by the dashboard audit feed.
+type testProxyRequestLogSummary struct {
+	// ID is the audit row identifier.
+	ID int64 `json:"id"`
+	// ProviderID is the selected provider identifier, when the request was proxied.
+	ProviderID *int64 `json:"providerId,omitempty"`
+	// ProviderName is the provider label recorded by the gateway.
+	ProviderName string `json:"providerName,omitempty"`
+	// ModelID is the OpenAI model identifier used for routing.
+	ModelID string `json:"modelId,omitempty"`
+	// Method is the inbound HTTP verb.
+	Method string `json:"method"`
+	// Path is the inbound request path.
+	Path string `json:"path"`
+	// RawQuery is the inbound request query string.
+	RawQuery string `json:"rawQuery,omitempty"`
+	// Status is the final HTTP status returned to the caller.
+	Status int `json:"status,omitempty"`
+	// Error stores the final error message when the request fails.
+	Error string `json:"error,omitempty"`
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS int64 `json:"durationMs,omitempty"`
+	// CachedInputTokens stores the input tokens served from cache.
+	CachedInputTokens int64 `json:"cachedInputTokens"`
+	// NonCachedInputTokens stores the input tokens that were not cached.
+	NonCachedInputTokens int64 `json:"nonCachedInputTokens"`
+	// OutputTokens stores the generated output tokens.
+	OutputTokens int64 `json:"outputTokens"`
+	// TotalTokens stores the sum of input and output tokens.
+	TotalTokens int64 `json:"totalTokens"`
+	// RequestedAt records when the request arrived at the gateway.
+	RequestedAt string `json:"requestedAt"`
+	// CompletedAt records when the request finished, when available.
+	CompletedAt string `json:"completedAt,omitempty"`
 }
 
 // testProxyRequestReceivedRequest mirrors the inbound request section in the
@@ -125,7 +163,8 @@ type testProxyRequestReceivedResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// testProxyRequestLog mirrors the request-log fields asserted by the integration test.
+// testProxyRequestLog mirrors the detailed request-log payload returned by the
+// single-record inspector endpoint.
 type testProxyRequestLog struct {
 	// ID is the audit row identifier.
 	ID int64 `json:"id"`
@@ -141,8 +180,20 @@ type testProxyRequestLog struct {
 	SentRequest *testProxyRequestSentRequest `json:"sentRequest,omitempty"`
 	// ReceivedResponse stores the final response details returned to the caller.
 	ReceivedResponse testProxyRequestReceivedResponse `json:"receivedResponse"`
+	// DurationMS stores the elapsed time in milliseconds.
+	DurationMS int64 `json:"durationMs,omitempty"`
+	// CachedInputTokens stores the input tokens served from cache.
+	CachedInputTokens int64 `json:"cachedInputTokens"`
+	// NonCachedInputTokens stores the input tokens that were not cached.
+	NonCachedInputTokens int64 `json:"nonCachedInputTokens"`
+	// OutputTokens stores the generated output tokens.
+	OutputTokens int64 `json:"outputTokens"`
+	// TotalTokens stores the sum of input and output tokens.
+	TotalTokens int64 `json:"totalTokens"`
 	// RequestedAt records when the request arrived at the gateway.
 	RequestedAt string `json:"requestedAt"`
+	// CompletedAt records when the request finished, when available.
+	CompletedAt string `json:"completedAt,omitempty"`
 }
 
 // testDeleteProxyRequestsResponse mirrors the deletion response returned by the
@@ -277,8 +328,8 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	}
 
 	chatLog := logsPayload.Requests[0]
-	if chatLog.ReceivedRequest.Path != "/v1/chat/completions" {
-		t.Fatalf("chat request path = %q, want %q", chatLog.ReceivedRequest.Path, "/v1/chat/completions")
+	if chatLog.Path != "/v1/chat/completions" {
+		t.Fatalf("chat request path = %q, want %q", chatLog.Path, "/v1/chat/completions")
 	}
 	if chatLog.ModelID != "gpt-4.1" {
 		t.Fatalf("chat request model = %q, want %q", chatLog.ModelID, "gpt-4.1")
@@ -289,46 +340,59 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	if chatLog.ProviderName != "Primary" {
 		t.Fatalf("chat request provider name = %q, want %q", chatLog.ProviderName, "Primary")
 	}
-	if chatLog.SentRequest == nil {
-		t.Fatalf("chat sent request = nil, want populated request snapshot")
+	if chatLog.Method != http.MethodPost {
+		t.Fatalf("chat request method = %q, want %q", chatLog.Method, http.MethodPost)
 	}
-	if chatLog.SentRequest.Method != http.MethodPost {
-		t.Fatalf("chat sent request method = %q, want %q", chatLog.SentRequest.Method, http.MethodPost)
+	if chatLog.Status != http.StatusOK {
+		t.Fatalf("chat response status = %d, want %d", chatLog.Status, http.StatusOK)
 	}
-	if !strings.Contains(chatLog.SentRequest.URL, "/v1/chat/completions") {
-		t.Fatalf("chat sent request url = %q, expected upstream chat path", chatLog.SentRequest.URL)
-	}
-	if !strings.Contains(chatLog.SentRequest.Headers, userAgent) {
-		t.Fatalf("chat sent request headers = %q, expected upstream user agent", chatLog.SentRequest.Headers)
-	}
-	if !strings.Contains(chatLog.SentRequest.Body, `"model":"gpt-4.1"`) {
-		t.Fatalf("chat sent request body = %q, expected model hint", chatLog.SentRequest.Body)
-	}
-	if chatLog.ReceivedResponse.Status != http.StatusOK {
-		t.Fatalf("chat response status = %d, want %d", chatLog.ReceivedResponse.Status, http.StatusOK)
-	}
-	if !strings.Contains(chatLog.ReceivedRequest.Body, `"model":"gpt-4.1"`) {
-		t.Fatalf("chat request body = %q, expected model hint", chatLog.ReceivedRequest.Body)
-	}
-	if !strings.Contains(chatLog.ReceivedResponse.Headers, "X-Aggr-Provider") {
-		t.Fatalf("chat response headers = %q, expected X-Aggr-Provider", chatLog.ReceivedResponse.Headers)
-	}
-	if !strings.Contains(chatLog.ReceivedResponse.Body, `"object":"chat.completion"`) {
-		t.Fatalf("chat response body = %q, expected completion payload", chatLog.ReceivedResponse.Body)
+	if chatLog.CachedInputTokens != 0 || chatLog.NonCachedInputTokens != 0 || chatLog.OutputTokens != 0 || chatLog.TotalTokens != 0 {
+		t.Fatalf("chat summary tokens = %#v, want zero usage because upstream response omitted usage", chatLog)
 	}
 
 	modelsLog := logsPayload.Requests[1]
-	if modelsLog.ReceivedRequest.Path != "/v1/models" {
-		t.Fatalf("models request path = %q, want %q", modelsLog.ReceivedRequest.Path, "/v1/models")
+	if modelsLog.Path != "/v1/models" {
+		t.Fatalf("models request path = %q, want %q", modelsLog.Path, "/v1/models")
 	}
 	if modelsLog.ProviderID != nil {
 		t.Fatalf("models request provider id = %v, want nil", modelsLog.ProviderID)
 	}
-	if modelsLog.SentRequest != nil {
-		t.Fatalf("models sent request = %#v, want nil", modelsLog.SentRequest)
+	if modelsLog.Status != http.StatusOK {
+		t.Fatalf("models response status = %d, want %d", modelsLog.Status, http.StatusOK)
 	}
-	if !strings.Contains(modelsLog.ReceivedResponse.Body, `"object":"list"`) {
-		t.Fatalf("models response body = %q, expected aggregated models payload", modelsLog.ReceivedResponse.Body)
+
+	chatLogDetail := loadTestProxyRequestLog(t, client, gatewayURL, chatLog.ID)
+	if chatLogDetail.SentRequest == nil {
+		t.Fatalf("chat sent request = nil, want populated request snapshot")
+	}
+	if chatLogDetail.SentRequest.Method != http.MethodPost {
+		t.Fatalf("chat sent request method = %q, want %q", chatLogDetail.SentRequest.Method, http.MethodPost)
+	}
+	if !strings.Contains(chatLogDetail.SentRequest.URL, "/v1/chat/completions") {
+		t.Fatalf("chat sent request url = %q, expected upstream chat path", chatLogDetail.SentRequest.URL)
+	}
+	if !strings.Contains(chatLogDetail.SentRequest.Headers, userAgent) {
+		t.Fatalf("chat sent request headers = %q, expected upstream user agent", chatLogDetail.SentRequest.Headers)
+	}
+	if !strings.Contains(chatLogDetail.SentRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("chat sent request body = %q, expected model hint", chatLogDetail.SentRequest.Body)
+	}
+	if !strings.Contains(chatLogDetail.ReceivedRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("chat request body = %q, expected model hint", chatLogDetail.ReceivedRequest.Body)
+	}
+	if !strings.Contains(chatLogDetail.ReceivedResponse.Headers, "X-Aggr-Provider") {
+		t.Fatalf("chat response headers = %q, expected X-Aggr-Provider", chatLogDetail.ReceivedResponse.Headers)
+	}
+	if !strings.Contains(chatLogDetail.ReceivedResponse.Body, `"object":"chat.completion"`) {
+		t.Fatalf("chat response body = %q, expected completion payload", chatLogDetail.ReceivedResponse.Body)
+	}
+
+	modelsLogDetail := loadTestProxyRequestLog(t, client, gatewayURL, modelsLog.ID)
+	if modelsLogDetail.SentRequest != nil {
+		t.Fatalf("models sent request = %#v, want nil", modelsLogDetail.SentRequest)
+	}
+	if !strings.Contains(modelsLogDetail.ReceivedResponse.Body, `"object":"list"`) {
+		t.Fatalf("models response body = %q, expected aggregated models payload", modelsLogDetail.ReceivedResponse.Body)
 	}
 
 	var providerDeletePayload testDeleteProxyRequestsResponse
@@ -349,8 +413,8 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	if len(logsPayload.Requests) != 1 {
 		t.Fatalf("expected 1 request log after provider delete, got %d", len(logsPayload.Requests))
 	}
-	if logsPayload.Requests[0].ReceivedRequest.Path != "/v1/models" {
-		t.Fatalf("remaining request path = %q, want %q", logsPayload.Requests[0].ReceivedRequest.Path, "/v1/models")
+	if logsPayload.Requests[0].Path != "/v1/models" {
+		t.Fatalf("remaining request path = %q, want %q", logsPayload.Requests[0].Path, "/v1/models")
 	}
 
 	modelsRequestedAt := logsPayload.Requests[0].RequestedAt
@@ -371,6 +435,77 @@ func TestGatewayRequestLogsAndDeletion(t *testing.T) {
 	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
 	if len(logsPayload.Requests) != 0 {
 		t.Fatalf("expected 0 request logs after date delete, got %d", len(logsPayload.Requests))
+	}
+}
+
+// TestRequestLogListIncludesUnfinishedRequests verifies that the admin request
+// log API can list audit rows whose response metadata is still NULL because the
+// proxied request has not finished yet.
+func TestRequestLogListIncludesUnfinishedRequests(t *testing.T) {
+	t.Parallel()
+
+	gatewayURL, client, db := newTestGatewayServerWithDatabase(t)
+	requestedAt := time.Now().UTC().Add(-time.Minute)
+
+	if _, err := db.Exec(`
+		INSERT INTO proxy_request_logs (
+			provider_id, provider_name, model_id, method, path, raw_query,
+			request_headers, request_body, request_body_truncated, requested_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		nil,
+		"",
+		"gpt-4.1",
+		http.MethodPost,
+		"/v1/chat/completions",
+		"",
+		`{"content-type":"application/json"}`,
+		`{"model":"gpt-4.1","messages":[{"role":"user","content":"hello"}]}`,
+		0,
+		requestedAt.Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("insert unfinished proxy request log: %v", err)
+	}
+
+	var logsPayload testProxyRequestsResponse
+	doJSONRequest(t, client, http.MethodGet, gatewayURL+"/api/requests?limit=10", "", http.StatusOK, &logsPayload)
+
+	if len(logsPayload.Requests) != 1 {
+		t.Fatalf("expected 1 unfinished request log, got %d", len(logsPayload.Requests))
+	}
+
+	log := logsPayload.Requests[0]
+	if log.Path != "/v1/chat/completions" {
+		t.Fatalf("unfinished request path = %q, want %q", log.Path, "/v1/chat/completions")
+	}
+	if log.ModelID != "gpt-4.1" {
+		t.Fatalf("unfinished request model = %q, want %q", log.ModelID, "gpt-4.1")
+	}
+	if log.Status != 0 {
+		t.Fatalf("unfinished response status = %d, want 0", log.Status)
+	}
+	if log.Error != "" {
+		t.Fatalf("unfinished response error = %q, want empty string", log.Error)
+	}
+	if log.CachedInputTokens != 0 || log.NonCachedInputTokens != 0 || log.OutputTokens != 0 || log.TotalTokens != 0 {
+		t.Fatalf("unfinished summary tokens = %#v, want zero token counts", log)
+	}
+
+	logDetail := loadTestProxyRequestLog(t, client, gatewayURL, log.ID)
+	if logDetail.SentRequest != nil {
+		t.Fatalf("unfinished sent request = %#v, want nil", logDetail.SentRequest)
+	}
+	if logDetail.ReceivedResponse.Headers != "" {
+		t.Fatalf("unfinished response headers = %q, want empty string", logDetail.ReceivedResponse.Headers)
+	}
+	if logDetail.ReceivedResponse.Body != "" {
+		t.Fatalf("unfinished response body = %q, want empty string", logDetail.ReceivedResponse.Body)
+	}
+	if logDetail.ReceivedResponse.Error != "" {
+		t.Fatalf("unfinished response error = %q, want empty string", logDetail.ReceivedResponse.Error)
+	}
+	if logDetail.ReceivedResponse.BodyTruncated {
+		t.Fatalf("unfinished response body truncated = %t, want false", logDetail.ReceivedResponse.BodyTruncated)
 	}
 }
 
@@ -708,23 +843,37 @@ func TestResponsesWebSocketMode(t *testing.T) {
 	}
 
 	log := logsPayload.Requests[0]
-	if log.ReceivedRequest.Path != "/v1/responses" {
-		t.Fatalf("responses websocket request path = %q, want %q", log.ReceivedRequest.Path, "/v1/responses")
+	if log.Path != "/v1/responses" {
+		t.Fatalf("responses websocket request path = %q, want %q", log.Path, "/v1/responses")
 	}
 	if log.ModelID != "alias-responses" {
 		t.Fatalf("responses websocket model = %q, want %q", log.ModelID, "alias-responses")
 	}
-	if log.SentRequest == nil {
+	if log.Status != http.StatusOK {
+		t.Fatalf("responses websocket response status = %d, want %d", log.Status, http.StatusOK)
+	}
+	if log.CachedInputTokens != 3 {
+		t.Fatalf("responses websocket cached input tokens = %d, want 3", log.CachedInputTokens)
+	}
+	if log.NonCachedInputTokens != 8 {
+		t.Fatalf("responses websocket non-cached input tokens = %d, want 8", log.NonCachedInputTokens)
+	}
+	if log.OutputTokens != 7 {
+		t.Fatalf("responses websocket output tokens = %d, want 7", log.OutputTokens)
+	}
+	if log.TotalTokens != 18 {
+		t.Fatalf("responses websocket total tokens = %d, want 18", log.TotalTokens)
+	}
+
+	logDetail := loadTestProxyRequestLog(t, client, gatewayURL, log.ID)
+	if logDetail.SentRequest == nil {
 		t.Fatalf("responses websocket sent request = nil, want populated request snapshot")
 	}
-	if !strings.Contains(log.SentRequest.Body, `"model":"gpt-4.1"`) {
-		t.Fatalf("responses websocket sent body = %q, want rewritten upstream model", log.SentRequest.Body)
+	if !strings.Contains(logDetail.SentRequest.Body, `"model":"gpt-4.1"`) {
+		t.Fatalf("responses websocket sent body = %q, want rewritten upstream model", logDetail.SentRequest.Body)
 	}
-	if log.ReceivedResponse.Status != http.StatusOK {
-		t.Fatalf("responses websocket response status = %d, want %d", log.ReceivedResponse.Status, http.StatusOK)
-	}
-	if !strings.Contains(log.ReceivedResponse.Body, `"type":"response.completed"`) {
-		t.Fatalf("responses websocket response body = %q, want completed event", log.ReceivedResponse.Body)
+	if !strings.Contains(logDetail.ReceivedResponse.Body, `"type":"response.completed"`) {
+		t.Fatalf("responses websocket response body = %q, want completed event", logDetail.ReceivedResponse.Body)
 	}
 }
 
@@ -1075,6 +1224,25 @@ func createTestGatewayAPIKey(t *testing.T, client *http.Client, gatewayURL strin
 	}
 
 	return payload.APIKey
+}
+
+// loadTestProxyRequestLog fetches one full audit-log record through the detail
+// endpoint so tests can assert the stored headers and bodies on demand.
+func loadTestProxyRequestLog(t *testing.T, client *http.Client, gatewayURL string, id int64) testProxyRequestLog {
+	t.Helper()
+
+	var payload testProxyRequestLog
+	doJSONRequest(
+		t,
+		client,
+		http.MethodGet,
+		gatewayURL+"/api/requests/"+strconv.FormatInt(id, 10),
+		"",
+		http.StatusOK,
+		&payload,
+	)
+
+	return payload
 }
 
 // loginTestClient authenticates the provided client against the gateway using
