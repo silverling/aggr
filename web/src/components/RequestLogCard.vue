@@ -25,9 +25,9 @@ const expanded = ref(false)
 const cardRoot = ref<HTMLElement | null>(null)
 const summaryButton = ref<HTMLButtonElement | null>(null)
 const detailRefreshIntervalMs = 5000
-const detailTransitionDurationMs = 800
+const detailTransitionDurationMs = 400
 const detailEnterOpacityDurationMs = 1000
-const detailLeaveOpacityDurationMs = 800
+const detailLeaveOpacityDurationMs = 400
 const scrollTopInsetPx = 16
 
 let detailRefreshTimer: number | null = null
@@ -473,33 +473,21 @@ onBeforeUnmount(() => {
 					</span>
 				</div>
 
-				<div v-if="summaryStatus?.toString().startsWith('2')" class="flex flex-wrap gap-2 font-mono text-[0.72rem] text-ink-soft">
-					<span
-						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
-						:title="`Cached ${props.requestLog.cachedInputTokens} tokens`"
-					>
+				<div v-if="summaryStatus?.toString().startsWith('2')" class="flex flex-wrap items-baseline gap-2 font-mono">
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Cached ${props.requestLog.cachedInputTokens} tokens`">
 						<ArrowRightFromLine class="size-3" /> {{ formatTokenCount(props.requestLog.cachedInputTokens) }}
 					</span>
-					<span
-						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
-						:title="`Non-cached ${props.requestLog.nonCachedInputTokens} tokens`"
-					>
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Non-cached ${props.requestLog.nonCachedInputTokens} tokens`">
 						<ArrowRight class="size-3" /> {{ formatTokenCount(props.requestLog.nonCachedInputTokens) }}
 					</span>
-					<span
-						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
-						:title="`Output ${props.requestLog.outputTokens} tokens`"
-					>
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Output ${props.requestLog.outputTokens} tokens`">
 						<ArrowLeft class="size-3" /> {{ formatTokenCount(props.requestLog.outputTokens) }}
 					</span>
-					<span
-						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
-						:title="`Total ${props.requestLog.totalTokens} tokens`"
-					>
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Total ${props.requestLog.totalTokens} tokens`">
 						<RefreshCcw class="size-3" /> {{ formatTokenCount(props.requestLog.totalTokens) }}
 					</span>
 					<span
-						class="rounded-full border border-line bg-white/65 px-3 py-1.5 flex items-center gap-1"
+						class="badge badge-lg text-ink-soft font-normal px-3 h-6"
 						:title="`Cache rate ${formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens)}`"
 					>
 						<Ratio class="size-3" /> {{ formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens) }}</span

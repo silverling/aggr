@@ -86,9 +86,7 @@ function bucketTitle(bucket: RequestStatsBucket) {
 		<div class="grid gap-1">
 			<h3 class="flex justify-between items-center">
 				<span>{{ props.title }}</span>
-				<span class="ml-auto rounded-full border border-line bg-white/70 px-3 py-1.5 font-mono text-[0.8rem] font-bold text-ink-strong">
-					Max {{ formatCompactNumber(maxConsumedTokens) }}
-				</span>
+				<span class="ml-auto badge badge-xl"> Max {{ formatCompactNumber(maxConsumedTokens) }} </span>
 			</h3>
 			<p v-if="props.subtitle" class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
 		</div>

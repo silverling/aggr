@@ -46,7 +46,7 @@ function actionLabel(rule: PendingModelDisableRule) {
 				<div v-for="rule in props.rules" :key="`${rule.providerId}:${rule.modelId}`" class="rounded-[18px] border border-line bg-white/80 p-3">
 					<div class="flex items-start justify-between gap-3">
 						<div class="min-w-0">
-							<p :class="['text-[0.72rem] font-bold uppercase tracking-[0.16em]', rule.disabled ? 'text-danger' : 'text-accent']">
+							<p :class="['eyebrow', rule.disabled ? 'text-danger' : 'text-accent']">
 								{{ actionLabel(rule) }}
 							</p>
 							<p class="mt-1 wrap-break-word font-mono text-[0.82rem] font-bold text-ink-strong">
@@ -54,7 +54,7 @@ function actionLabel(rule: PendingModelDisableRule) {
 							</p>
 						</div>
 						<button
-							class="border-0 bg-transparent p-0 text-sm font-bold text-ink-soft transition duration-150 ease-out hover:text-ink-strong"
+							class="btn btn-sm text-ink-soft transition duration-150 ease-out hover:text-ink-strong"
 							type="button"
 							@click="emit('remove-rule', rule)"
 						>
@@ -65,10 +65,10 @@ function actionLabel(rule: PendingModelDisableRule) {
 			</div>
 
 			<div class="mt-4 grid gap-2.5">
-				<button class="btn-primary" type="button" :disabled="props.applying" @click="emit('apply')">
+				<button class="btn btn-accent" type="button" :disabled="props.applying" @click="emit('apply')">
 					{{ props.applying ? 'Applying…' : `Apply ${props.rules.length} change${props.rules.length === 1 ? '' : 's'}` }}
 				</button>
-				<button class="btn-accent" type="button" :disabled="props.applying" @click="emit('clear')">Clear all</button>
+				<button class="btn" type="button" :disabled="props.applying" @click="emit('clear')">Cancel</button>
 			</div>
 		</div>
 	</aside>

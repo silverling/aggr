@@ -28,9 +28,9 @@ function pendingRule(providerId: number) {
 				:key="provider.id"
 				data-anchor="model-card-provider"
 				:class="[
-					'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
+					'badge badge-lg transition duration-150 ease-out hover:-translate-y-px',
 					pendingRule(provider.id)?.disabled
-						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+						? 'border-[rgba(164,63,63,0.24)] bg-danger-soft text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: isSelected(provider.id)
 							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 							: 'border-[rgba(200,93,53,0.14)] bg-[rgba(200,93,53,0.08)] text-accent-strong',

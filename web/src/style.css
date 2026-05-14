@@ -1,5 +1,4 @@
 @import 'tailwindcss';
-
 @theme {
 	--font-body: 'DM Sans', sans-serif;
 	--font-display: 'Iowan Old Style', 'Palatino Linotype', serif;
@@ -13,7 +12,6 @@
 	--color-surface: rgba(255, 252, 247, 0.88);
 	--color-surface-strong: rgba(255, 252, 247, 0.96);
 	--color-surface-muted: rgba(255, 247, 236, 0.78);
-	--color-accent: #0c7662;
 	--color-accent-soft: rgba(12, 118, 98, 0.14);
 	--color-accent-strong: #c85d35;
 	--color-danger: #a43f3f;
@@ -25,6 +23,19 @@
 	--radius-pill: 9999px;
 
 	--shadow-panel: 0 24px 60px rgba(22, 34, 49, 0.12);
+}
+
+@plugin 'daisyui' {
+	themes: light --default;
+}
+@plugin 'daisyui/theme' {
+	name: 'light';
+	default: true;
+	--color-base-100: rgba(255, 252, 247, 0.96);
+	--color-base-200: rgba(255, 255, 255, 0.72);
+	--color-base-content: var(--color-ink-strong);
+	--color-accent: #0c7662;
+	--color-accent-content: #f7fffc;
 }
 
 @layer base {
@@ -103,14 +114,45 @@
 	@apply text-ink-soft text-sm font-semibold;
 }
 
-@utility btn-primary {
-	@apply inline-flex min-h-12 items-center justify-center rounded-full border border-transparent bg-[linear-gradient(135deg,var(--color-accent),#0f9275)] px-4.5 font-bold text-[#f7fffc] transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full;
-}
-
-@utility btn-accent {
-	@apply border-line text-ink-strong inline-flex min-h-12 items-center justify-center rounded-full border bg-[rgba(255,255,255,0.72)] px-4.5 font-bold transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full;
+/* Custom DaisyUI utilities */
+@utility btn {
+	@apply rounded-full font-bold;
 }
 
 @utility btn-danger {
-	@apply text-danger inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-4.5 font-bold transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full;
+	@apply text-danger border-danger;
+}
+
+@utility badge {
+	@apply border-line bg-base-200 text-ink-strong rounded-full font-mono text-[0.7rem] font-bold;
+}
+
+@utility badge-lg {
+	font-size: 0.78rem;
+}
+
+@utility badge-xl {
+	font-size: 0.8rem;
+}
+
+@utility select {
+	@apply bg-white/90 transition duration-150 ease-out outline-none focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)];
+}
+
+@utility select-lg {
+	@apply text-base;
+}
+
+@utility input {
+	@apply border-line-strong border bg-white/90 transition duration-150 ease-out outline-none focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)];
+}
+
+@utility input-lg {
+	@apply text-base;
+}
+
+@utility collapse-arrow {
+	> .collapse-title:after {
+		box-shadow: 1px 1px;
+	}
 }
