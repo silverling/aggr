@@ -762,7 +762,7 @@ func (s *server) withLogging(next http.Handler) http.Handler {
 		startedAt := time.Now()
 		writer := newLoggingResponseWriter(w)
 		next.ServeHTTP(writer, r)
-		s.logger.Info(
+		s.logger.Debug(
 			"http request",
 			"method", r.Method,
 			"path", r.URL.Path,
