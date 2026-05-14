@@ -9,8 +9,8 @@ import {
 	prettyJSONString,
 } from '../lib/utils'
 import type { ProxyRequestLogSummaryView, ProxyRequestLogView } from '../types'
-import { Package, Building2, Clock, ClockArrowUp } from '@lucide/vue'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { Package, Building2, Clock, ClockArrowUp, ArrowRight, ArrowLeft, ArrowRightFromLine, RefreshCcw, Ratio } from '@lucide/vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
 	pageActive: boolean
@@ -22,17 +22,12 @@ const detail = ref<ProxyRequestLogView | null>(null)
 const detailError = ref('')
 const detailLoading = ref(false)
 const expanded = ref(false)
-const cardRoot = ref<HTMLElement | null>(null)
-const summaryButton = ref<HTMLButtonElement | null>(null)
 const detailRefreshIntervalMs = 5000
-const detailTransitionDurationMs = 800
+const detailTransitionDurationMs = 400
 const detailEnterOpacityDurationMs = 1000
-const detailLeaveOpacityDurationMs = 800
-const scrollTopInsetPx = 16
+const detailLeaveOpacityDurationMs = 400
 
 let detailRefreshTimer: number | null = null
-let resizeFollowFrame: number | null = null
-let resizeFollowObserver: ResizeObserver | null = null
 
 const summaryError = computed(() => detail.value?.receivedResponse.error ?? props.requestLog.error ?? '')
 const summaryStatus = computed(() => detail.value?.receivedResponse.status ?? props.requestLog.status)
@@ -187,108 +182,11 @@ async function loadDetail(background = false) {
 	}
 }
 
-function applyCardScroll(behavior: ScrollBehavior) {
-	const card = cardRoot.value
-	const anchor = summaryButton.value ?? card
-	if (card === null || anchor === null) {
-		return
-	}
-
-	const scrollContainer = findScrollableAncestor(card)
-	if (scrollContainer === null) {
-		const anchorRect = anchor.getBoundingClientRect()
-		window.scrollTo({
-			top: Math.max(0, window.scrollY + anchorRect.top - scrollTopInsetPx),
-			behavior,
-		})
-		return
-	}
-
-	const containerRect = scrollContainer.getBoundingClientRect()
-	const anchorRect = anchor.getBoundingClientRect()
-	const targetTop = scrollContainer.scrollTop + (anchorRect.top - containerRect.top) - scrollTopInsetPx
-	const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
-
-	scrollContainer.scrollTo({
-		top: Math.min(Math.max(0, targetTop), maxScrollTop),
-		behavior,
-	})
-}
-
-async function scrollCardIntoVisibleArea(behavior: ScrollBehavior = 'smooth') {
-	if (!expanded.value) {
-		return
-	}
-
-	await waitForNextFrame()
-	applyCardScroll(behavior)
-}
-
-function findScrollableAncestor(element: HTMLElement) {
-	let current = element.parentElement
-	while (current) {
-		const style = window.getComputedStyle(current)
-		const overflowY = style.overflowY
-		if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') && current.scrollHeight > current.clientHeight) {
-			return current
-		}
-		current = current.parentElement
-	}
-
-	return null
-}
-
-async function waitForNextFrame() {
-	await nextTick()
-	await new Promise<void>((resolve) => {
-		requestAnimationFrame(() => resolve())
-	})
-}
-
 function stopDetailRefreshTimer() {
 	if (detailRefreshTimer !== null) {
 		window.clearInterval(detailRefreshTimer)
 		detailRefreshTimer = null
 	}
-}
-
-function stopResizeFollow() {
-	if (resizeFollowFrame !== null) {
-		cancelAnimationFrame(resizeFollowFrame)
-		resizeFollowFrame = null
-	}
-
-	if (resizeFollowObserver !== null) {
-		resizeFollowObserver.disconnect()
-		resizeFollowObserver = null
-	}
-}
-
-function scheduleResizeFollowScroll() {
-	if (resizeFollowFrame !== null) {
-		return
-	}
-
-	resizeFollowFrame = requestAnimationFrame(() => {
-		resizeFollowFrame = null
-		if (expanded.value) {
-			applyCardScroll('auto')
-		}
-	})
-}
-
-function startResizeFollow() {
-	stopResizeFollow()
-
-	const card = cardRoot.value
-	if (card === null || typeof ResizeObserver === 'undefined') {
-		return
-	}
-
-	resizeFollowObserver = new ResizeObserver(() => {
-		scheduleResizeFollowScroll()
-	})
-	resizeFollowObserver.observe(card)
 }
 
 function syncDetailRefreshTimer() {
@@ -304,22 +202,14 @@ function syncDetailRefreshTimer() {
 
 function toggleExpanded() {
 	expanded.value = !expanded.value
-
 	if (!expanded.value) {
 		stopDetailRefreshTimer()
-		stopResizeFollow()
 		return
 	}
-
-	void scrollCardIntoVisibleArea()
-	startResizeFollow()
-
 	if (detail.value === null || detailError.value !== '') {
 		void loadDetail(false)
 		return
 	}
-
-	syncDetailRefreshTimer()
 }
 
 function setPanelStyles(panel: HTMLElement, height: string, opacity: string, transform: string) {
@@ -436,7 +326,6 @@ watch(
 
 onBeforeUnmount(() => {
 	stopDetailRefreshTimer()
-	stopResizeFollow()
 })
 </script>
 
@@ -473,21 +362,24 @@ onBeforeUnmount(() => {
 					</span>
 				</div>
 
-				<div v-if="summaryStatus?.toString().startsWith('2')" class="flex flex-wrap gap-2 font-mono text-[0.72rem] text-ink-soft">
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5"
-						>cached {{ formatTokenCount(props.requestLog.cachedInputTokens) }}</span
-					>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5">
-						non-cached {{ formatTokenCount(props.requestLog.nonCachedInputTokens) }}
+				<div v-if="summaryStatus?.toString().startsWith('2')" class="flex flex-wrap items-baseline gap-2 font-mono">
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Cached ${props.requestLog.cachedInputTokens} tokens`">
+						<ArrowRightFromLine class="size-3" /> {{ formatTokenCount(props.requestLog.cachedInputTokens) }}
 					</span>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5"
-						>output {{ formatTokenCount(props.requestLog.outputTokens) }}</span
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Non-cached ${props.requestLog.nonCachedInputTokens} tokens`">
+						<ArrowRight class="size-3" /> {{ formatTokenCount(props.requestLog.nonCachedInputTokens) }}
+					</span>
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Output ${props.requestLog.outputTokens} tokens`">
+						<ArrowLeft class="size-3" /> {{ formatTokenCount(props.requestLog.outputTokens) }}
+					</span>
+					<span class="badge badge-lg text-ink-soft font-normal px-3 h-6" :title="`Total ${props.requestLog.totalTokens} tokens`">
+						<RefreshCcw class="size-3" /> {{ formatTokenCount(props.requestLog.totalTokens) }}
+					</span>
+					<span
+						class="badge badge-lg text-ink-soft font-normal px-3 h-6"
+						:title="`Cache rate ${formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens)}`"
 					>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5"
-						>total {{ formatTokenCount(props.requestLog.totalTokens) }}</span
-					>
-					<span class="rounded-full border border-line bg-white/65 px-3 py-1.5">
-						rate {{ formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens) }}</span
+						<Ratio class="size-3" /> {{ formatCacheRate(props.requestLog.cachedInputTokens, props.requestLog.totalTokens) }}</span
 					>
 				</div>
 			</div>

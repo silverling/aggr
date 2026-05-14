@@ -5,7 +5,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{
 	title: string
-	subtitle: string
+	subtitle?: string
 	buckets: RequestStatsBucket[]
 	bucketLabelKind: 'day' | 'hour'
 }>()
@@ -27,7 +27,7 @@ const tooltipFormatter = new Intl.DateTimeFormat(undefined, {
 })
 
 const maxConsumedTokens = computed(() =>
-	Math.max(1, ...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens)),
+	Math.max(0, ...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens)),
 )
 
 // bucketStart parses the RFC3339 bucket start timestamp so labels and tooltips
@@ -86,11 +86,9 @@ function bucketTitle(bucket: RequestStatsBucket) {
 		<div class="grid gap-1">
 			<h3 class="flex justify-between items-center">
 				<span>{{ props.title }}</span>
-				<span class="ml-auto rounded-full border border-line bg-white/70 px-3 py-1.5 font-mono text-[0.8rem] font-bold text-ink-strong">
-					Max {{ formatCompactNumber(maxConsumedTokens) }}
-				</span>
+				<span class="ml-auto badge badge-xl"> Max {{ formatCompactNumber(maxConsumedTokens) }} </span>
 			</h3>
-			<p class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
+			<p v-if="props.subtitle" class="mt-1.5 leading-[1.6] text-ink-soft">{{ props.subtitle }}</p>
 		</div>
 
 		<div class="flex flex-wrap items-center gap-3 text-sm text-ink-soft">

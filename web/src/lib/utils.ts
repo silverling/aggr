@@ -57,6 +57,13 @@ export function isJSONContentType(value: string) {
 	return value === 'application/json' || value.endsWith('+json')
 }
 
+export function scrollToAnchor(anchor: string, offset = 0) {
+	const el = document.querySelector(`[data-anchor="${anchor}"]`)
+	if (el) {
+		window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - offset, behavior: 'smooth' })
+	}
+}
+
 export function prettyJSONString(value: string) {
 	try {
 		return JSON.stringify(JSON.parse(value), null, 2)

@@ -23,31 +23,19 @@ function onRangeChange(event: Event) {
 
 <template>
 	<section data-anchor="request-stats" class="rounded-panel border border-line bg-surface p-5 shadow-panel backdrop-blur-[18px] lg:p-7">
-		<div class="mb-5 flex items-start justify-between gap-3 max-lg:flex-col max-lg:items-stretch">
+		<div class="mb-5 gap-3 max-lg:flex-col max-lg:items-stretch">
 			<div>
-				<p class="mb-3 text-xs font-bold uppercase tracking-widest text-accent">Stats</p>
-				<h2>Traffic and usage</h2>
-			</div>
-
-			<div class="flex flex-wrap items-center gap-3 max-lg:flex-col max-lg:items-stretch">
-				<label class="flex items-center gap-2">
-					<select
-						data-anchor="stats-range"
-						:value="props.range"
-						class="min-w-50 rounded-(--radius-field) border border-line-strong bg-white/90 px-4 py-2 text-ink-strong outline-none transition duration-150 ease-out focus:-translate-y-px focus:border-[rgba(12,118,98,0.45)] focus:shadow-[0_0_0_4px_rgba(12,118,98,0.1)]"
-						@change="onRangeChange"
-					>
-						<option v-for="option in props.rangeOptions" :key="option.value" :value="option.value">
-							{{ option.label }}
-						</option>
-					</select>
-				</label>
-				<span
-					v-if="props.loading"
-					class="inline-flex min-h-12 items-center rounded-full border border-line bg-white/70 px-4 font-mono text-[0.8rem] font-bold text-ink-soft"
-				>
-					Refreshing…
-				</span>
+				<p class="mb-3 eyebrow">Stats</p>
+				<div class="flex w-full">
+					<h2>Traffic and usage</h2>
+					<label class="flex items-center gap-2 ml-auto">
+						<select data-anchor="stats-range" :value="props.range" class="select min-w-50" @change="onRangeChange">
+							<option v-for="option in props.rangeOptions" :key="option.value" :value="option.value">
+								{{ option.label }}
+							</option>
+						</select>
+					</label>
+				</div>
 			</div>
 		</div>
 
@@ -61,25 +49,15 @@ function onRangeChange(event: Event) {
 				<StatCard label="Succeeded" :value="props.stats.summary.succeeded" description="Completed requests with 2xx responses" />
 				<StatCard label="Failed" :value="props.stats.summary.failed" description="Completed requests with non-2xx responses" />
 				<StatCard label="Ongoing" :value="props.stats.summary.ongoingRequests" description="Requests whose responses have not finished yet" />
-				<StatCard label="Consumed Tokens" :value="props.stats.summary.consumedTokens" description="Input plus output tokens" />
+				<StatCard label="Consumed Tokens" :value="props.stats.summary.consumedTokens" description="Input and output tokens" />
 				<StatCard label="Cached Input" :value="props.stats.summary.cachedInputTokens" description="Input tokens served from cache" />
 				<StatCard label="Non-Cached Input" :value="props.stats.summary.nonCachedInputTokens" description="Input tokens that were not cached" />
 				<StatCard label="Output Tokens" :value="props.stats.summary.outputTokens" description="Generated output tokens" />
 			</div>
 
 			<div class="grid gap-4.5 xl:grid-cols-2">
-				<TokenUsageChart
-					title="Recent 7 days"
-					subtitle="Token usage grouped by day from the last seven calendar days."
-					:buckets="props.stats.daily"
-					bucket-label-kind="day"
-				/>
-				<TokenUsageChart
-					title="Recent 12 hours"
-					subtitle="Token usage grouped by hour from the last twelve clock hours."
-					:buckets="props.stats.hourly"
-					bucket-label-kind="hour"
-				/>
+				<TokenUsageChart title="Recent 7 days" :buckets="props.stats.daily" bucket-label-kind="day" />
+				<TokenUsageChart title="Recent 12 hours" :buckets="props.stats.hourly" bucket-label-kind="hour" />
 			</div>
 		</div>
 

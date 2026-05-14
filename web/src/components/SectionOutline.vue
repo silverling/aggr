@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { scrollToAnchor } from '../lib/utils'
 import type { SectionOutlineItem } from '../types'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -9,20 +10,6 @@ const props = defineProps<{
 const activeAnchor = ref(props.items[0]?.anchor ?? '')
 const observedElements = new Map<Element, string>()
 let observer: IntersectionObserver | null = null
-
-// scrollToAnchor jumps to the requested dashboard section while keeping the
-// floating outline interaction local to this component.
-function scrollToAnchor(anchor: string) {
-	const element = document.querySelector<HTMLElement>(`[data-anchor="${anchor}"]`)
-	if (element === null) {
-		return
-	}
-
-	element.scrollIntoView({
-		behavior: 'smooth',
-		block: 'start',
-	})
-}
 
 // disconnectObserver tears down the active intersection observer so component
 // re-renders and unmounts do not leak browser observers.
@@ -108,7 +95,7 @@ watch(
 		<div
 			class="sticky top-6 w-55 rounded-3xl border border-[rgba(24,34,47,0.12)] bg-[rgba(255,252,247,0.64)] p-3 shadow-[0_20px_48px_rgba(22,34,49,0.1)] backdrop-blur-[18px]"
 		>
-			<p class="px-2.5 pb-2 text-[0.72rem] font-bold uppercase tracking-[0.18em] text-accent-strong">Outline</p>
+			<p class="px-2.5 pb-2 text-[0.72rem] font-bold uppercase tracking-widest text-accent-strong">Outline</p>
 			<nav class="grid gap-1.5">
 				<button
 					v-for="item in props.items"
@@ -120,7 +107,7 @@ watch(
 							: 'text-ink-soft hover:bg-black/5 hover:text-ink-strong',
 					]"
 					type="button"
-					@click="scrollToAnchor(item.anchor)"
+					@click="scrollToAnchor(item.anchor, 20)"
 				>
 					<span class="flex items-center gap-2.5">
 						<span

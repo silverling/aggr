@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PendingModelDisableRule, ProviderView } from '../types'
+import { Key } from '@lucide/vue'
 
 const props = defineProps<{
 	provider: ProviderView
@@ -47,14 +48,16 @@ function pendingRule(modelId: string) {
 
 <template>
 	<article data-anchor="provider-card" class="grid gap-3.5 rounded-card border border-line bg-surface-strong p-4.5">
-		<div class="flex items-center justify-between gap-3 max-lg:items-start">
-			<div>
-				<h3>{{ props.provider.name }}</h3>
-				<p class="mt-1.5 wrap-break-word text-sm text-ink-soft">{{ props.provider.baseUrl }}</p>
-			</div>
+		<div class="flex items-center gap-3">
+			<h3>{{ props.provider.name }}</h3>
+			<span class="badge wrap-break-word font-thin">{{ props.provider.baseUrl }}</span>
+			<span class="badge font-thin">
+				<Key class="size-2.5" />
+				{{ props.provider.apiKeyConfigured ? props.provider.apiKeyPreview : 'N/A' }}
+			</span>
 			<span
 				:class="[
-					'inline-flex items-center rounded-full px-2.5 py-1 font-mono text-[0.76rem] font-bold uppercase tracking-widest',
+					'badge uppercase ml-auto',
 					props.provider.enabled
 						? 'border border-accent-soft bg-accent-soft text-accent'
 						: 'border border-transparent bg-[rgba(24,34,47,0.08)] text-ink-soft',
@@ -65,9 +68,14 @@ function pendingRule(modelId: string) {
 		</div>
 
 		<div class="flex flex-wrap items-center justify-between gap-3 text-sm text-ink-soft max-lg:items-start">
-			<span>{{ props.provider.apiKeyConfigured ? props.provider.apiKeyPreview : 'No API key' }}</span>
-			<span class="wrap-break-word">User agent: {{ props.provider.userAgent ?? 'Default user agent' }}</span>
-			<span>{{ formatTimestamp(props.provider.lastSyncedAt) }}</span>
+			<span class="wrap-break-word space-x-2">
+				<span>User agent:</span>
+				<span class="text-ink-strong">{{ props.provider.userAgent ?? 'Default' }}</span>
+			</span>
+			<span class="space-x-1">
+				<span>Last sync at</span>
+				<span class="text-ink-strong">{{ formatTimestamp(props.provider.lastSyncedAt) }}</span>
+			</span>
 		</div>
 
 		<p v-if="props.provider.lastError" class="m-0 rounded-[14px] bg-danger-soft px-3.5 py-3 leading-normal text-danger">
@@ -80,9 +88,9 @@ function pendingRule(modelId: string) {
 				:key="model"
 				data-anchor="provider-card-model"
 				:class="[
-					'inline-flex items-center rounded-full border px-3 py-2 font-mono text-[0.82rem] font-bold transition duration-150 ease-out hover:-translate-y-px',
+					'badge badge-lg transition duration-150 ease-out hover:-translate-y-px',
 					pendingRule(model)?.disabled
-						? 'border-[rgba(164,63,63,0.24)] bg-[rgba(164,63,63,0.12)] text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
+						? 'border-[rgba(164,63,63,0.24)] bg-danger-soft text-danger shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 						: isSelected(model)
 							? 'border-[rgba(12,118,98,0.24)] bg-[rgba(12,118,98,0.12)] text-accent shadow-[0_10px_24px_rgba(24,34,47,0.08)]'
 							: isModelDisabled(model)
@@ -98,28 +106,11 @@ function pendingRule(modelId: string) {
 		<p v-else class="text-ink-soft">No models synced yet.</p>
 
 		<div class="flex flex-wrap items-center justify-start gap-3 max-lg:flex-col max-lg:items-stretch">
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				@click="emit('edit')"
-			>
-				Edit
-			</button>
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-line bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-ink-strong transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				:disabled="props.syncing"
-				@click="emit('sync')"
-			>
+			<button class="btn" type="button" @click="emit('edit')">Edit</button>
+			<button class="btn" type="button" :disabled="props.syncing" @click="emit('sync')">
 				{{ props.syncing ? 'Syncing…' : 'Sync models' }}
 			</button>
-			<button
-				class="inline-flex min-h-12 items-center justify-center rounded-full border border-[rgba(164,63,63,0.2)] bg-[rgba(255,255,255,0.72)] px-4.5 font-bold text-danger transition duration-150 ease-out hover:-translate-y-px hover:shadow-[0_10px_24px_rgba(24,34,47,0.12)] disabled:cursor-not-allowed disabled:opacity-60 max-lg:w-full"
-				type="button"
-				@click="emit('delete')"
-			>
-				Delete
-			</button>
+			<button class="btn btn-danger" type="button" @click="emit('delete')">Delete</button>
 		</div>
 	</article>
 </template>
