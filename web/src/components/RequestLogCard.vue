@@ -10,7 +10,7 @@ import {
 } from '../lib/utils'
 import type { ProxyRequestLogSummaryView, ProxyRequestLogView } from '../types'
 import { Package, Building2, Clock, ClockArrowUp, ArrowRight, ArrowLeft, ArrowRightFromLine, RefreshCcw, Ratio } from '@lucide/vue'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps<{
 	pageActive: boolean
@@ -22,17 +22,12 @@ const detail = ref<ProxyRequestLogView | null>(null)
 const detailError = ref('')
 const detailLoading = ref(false)
 const expanded = ref(false)
-const cardRoot = ref<HTMLElement | null>(null)
-const summaryButton = ref<HTMLButtonElement | null>(null)
 const detailRefreshIntervalMs = 5000
 const detailTransitionDurationMs = 400
 const detailEnterOpacityDurationMs = 1000
 const detailLeaveOpacityDurationMs = 400
-const scrollTopInsetPx = 16
 
 let detailRefreshTimer: number | null = null
-let resizeFollowFrame: number | null = null
-let resizeFollowObserver: ResizeObserver | null = null
 
 const summaryError = computed(() => detail.value?.receivedResponse.error ?? props.requestLog.error ?? '')
 const summaryStatus = computed(() => detail.value?.receivedResponse.status ?? props.requestLog.status)
@@ -187,108 +182,11 @@ async function loadDetail(background = false) {
 	}
 }
 
-function applyCardScroll(behavior: ScrollBehavior) {
-	const card = cardRoot.value
-	const anchor = summaryButton.value ?? card
-	if (card === null || anchor === null) {
-		return
-	}
-
-	const scrollContainer = findScrollableAncestor(card)
-	if (scrollContainer === null) {
-		const anchorRect = anchor.getBoundingClientRect()
-		window.scrollTo({
-			top: Math.max(0, window.scrollY + anchorRect.top - scrollTopInsetPx),
-			behavior,
-		})
-		return
-	}
-
-	const containerRect = scrollContainer.getBoundingClientRect()
-	const anchorRect = anchor.getBoundingClientRect()
-	const targetTop = scrollContainer.scrollTop + (anchorRect.top - containerRect.top) - scrollTopInsetPx
-	const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
-
-	scrollContainer.scrollTo({
-		top: Math.min(Math.max(0, targetTop), maxScrollTop),
-		behavior,
-	})
-}
-
-async function scrollCardIntoVisibleArea(behavior: ScrollBehavior = 'smooth') {
-	if (!expanded.value) {
-		return
-	}
-
-	await waitForNextFrame()
-	applyCardScroll(behavior)
-}
-
-function findScrollableAncestor(element: HTMLElement) {
-	let current = element.parentElement
-	while (current) {
-		const style = window.getComputedStyle(current)
-		const overflowY = style.overflowY
-		if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') && current.scrollHeight > current.clientHeight) {
-			return current
-		}
-		current = current.parentElement
-	}
-
-	return null
-}
-
-async function waitForNextFrame() {
-	await nextTick()
-	await new Promise<void>((resolve) => {
-		requestAnimationFrame(() => resolve())
-	})
-}
-
 function stopDetailRefreshTimer() {
 	if (detailRefreshTimer !== null) {
 		window.clearInterval(detailRefreshTimer)
 		detailRefreshTimer = null
 	}
-}
-
-function stopResizeFollow() {
-	if (resizeFollowFrame !== null) {
-		cancelAnimationFrame(resizeFollowFrame)
-		resizeFollowFrame = null
-	}
-
-	if (resizeFollowObserver !== null) {
-		resizeFollowObserver.disconnect()
-		resizeFollowObserver = null
-	}
-}
-
-function scheduleResizeFollowScroll() {
-	if (resizeFollowFrame !== null) {
-		return
-	}
-
-	resizeFollowFrame = requestAnimationFrame(() => {
-		resizeFollowFrame = null
-		if (expanded.value) {
-			applyCardScroll('auto')
-		}
-	})
-}
-
-function startResizeFollow() {
-	stopResizeFollow()
-
-	const card = cardRoot.value
-	if (card === null || typeof ResizeObserver === 'undefined') {
-		return
-	}
-
-	resizeFollowObserver = new ResizeObserver(() => {
-		scheduleResizeFollowScroll()
-	})
-	resizeFollowObserver.observe(card)
 }
 
 function syncDetailRefreshTimer() {
@@ -304,22 +202,14 @@ function syncDetailRefreshTimer() {
 
 function toggleExpanded() {
 	expanded.value = !expanded.value
-
 	if (!expanded.value) {
 		stopDetailRefreshTimer()
-		stopResizeFollow()
 		return
 	}
-
-	void scrollCardIntoVisibleArea()
-	startResizeFollow()
-
 	if (detail.value === null || detailError.value !== '') {
 		void loadDetail(false)
 		return
 	}
-
-	syncDetailRefreshTimer()
 }
 
 function setPanelStyles(panel: HTMLElement, height: string, opacity: string, transform: string) {
@@ -436,7 +326,6 @@ watch(
 
 onBeforeUnmount(() => {
 	stopDetailRefreshTimer()
-	stopResizeFollow()
 })
 </script>
 

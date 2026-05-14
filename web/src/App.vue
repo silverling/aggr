@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronsDown, Copy } from '@lucide/vue'
+import { Copy } from '@lucide/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Toaster, toast } from 'vue-sonner'
 import ApiKeyCard from './components/ApiKeyCard.vue'
@@ -124,8 +124,8 @@ const duplicateCoverageCount = computed(() => models.value.filter((model) => mod
 const requestLogCount = computed(() => requestLogs.value.length)
 const requestLogList = ref<HTMLElement | null>(null)
 const isPageActive = ref(true)
-const showRequestLogTopGlow = ref(false)
-const showRequestLogScrollCue = ref(false)
+const showScrollListTopGlow = ref(false)
+const showScrollListBottomGlow = ref(false)
 const sessionCount = computed(() => sessions.value.length)
 const apiKeyCount = computed(() => apiKeys.value.length)
 const statsError = ref('')
@@ -699,9 +699,7 @@ function startLiveRefreshTimer() {
 		return
 	}
 
-	liveRefreshTimer = window.setInterval(() => {
-		void refreshLivePanels()
-	}, liveRefreshIntervalMs)
+	liveRefreshTimer = window.setInterval(() => void refreshLivePanels(), liveRefreshIntervalMs)
 }
 
 function syncLiveRefreshTimer() {
@@ -1078,14 +1076,14 @@ async function clearLogs() {
 function syncRequestLogScrollCue() {
 	const element = requestLogList.value
 	if (element === null) {
-		showRequestLogTopGlow.value = false
-		showRequestLogScrollCue.value = false
+		showScrollListTopGlow.value = false
+		showScrollListBottomGlow.value = false
 		return
 	}
 
-	showRequestLogTopGlow.value = element.scrollTop > 12
+	showScrollListTopGlow.value = element.scrollTop > 12
 	const remainingScroll = element.scrollHeight - element.clientHeight - element.scrollTop
-	showRequestLogScrollCue.value = remainingScroll > 12
+	showScrollListBottomGlow.value = remainingScroll > 12
 }
 
 function syncRequestLogScrollCueAfterRender() {
@@ -1421,7 +1419,7 @@ onBeforeUnmount(() => {
 							</div>
 
 							<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface-strong p-4.5">
-								<span class="text-[0.82rem] font-bold uppercase tracking-widest text-accent-strong">Gateway base</span>
+								<span class="text-[0.82rem] font-bold uppercase tracking-wide text-accent-strong">Gateway base</span>
 								<code class="wrap-break-word text-ink-strong">{{ gatewayBase }}</code>
 								<button class="border-0 bg-transparent p-0 font-bold text-accent" type="button" @click="copyGatewayBase">
 									<Copy class="size-5" />
@@ -1759,32 +1757,26 @@ onBeforeUnmount(() => {
 
 						<div v-else class="relative">
 							<div class="relative overflow-hidden rounded-sm">
-								<div v-if="showRequestLogTopGlow" class="pointer-events-none absolute inset-x-0 top-0 z-10 h-6">
-									<div class="absolute inset-x-0 top-0 h-px bg-[rgba(24,34,47,0.06)]" />
-									<div class="absolute inset-x-4 -top-3.5 h-9 rounded-full bg-line-strong opacity-70 blur-md" />
-									<div
-										class="absolute inset-x-0 top-0 h-6 bg-linear-to-b from-[rgba(24,34,47,0.06)] via-[rgba(24,34,47,0.025)] to-transparent"
-									/>
-								</div>
-								<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto px-1 pb-8 pt-1" @scroll="syncRequestLogScrollCue">
+								<div ref="requestLogList" class="grid max-h-[80vh] gap-2 overflow-y-auto pl-1 pr-3 z-20" @scroll="syncRequestLogScrollCue">
 									<RequestLogCard
 										v-for="requestLog in requestLogs"
+										class="z-10"
 										:key="requestLog.id"
 										:page-active="isPageActive"
 										:request-log="requestLog"
 										:load-request-log-detail="loadRequestLogDetail"
 									/>
 								</div>
-								<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-18">
-									<div class="absolute inset-x-4 -bottom-4 h-10 rounded-full bg-surface-strong opacity-95 blur-md" />
-									<div class="absolute inset-x-0 bottom-0 h-18 bg-linear-to-t from-surface via-[rgba(255,252,247,0.5)] to-transparent" />
-								</div>
-							</div>
-							<div v-if="showRequestLogScrollCue" class="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center">
-								<div class="badge text-ink-soft shadow-[0_10px_20px_rgba(24,34,47,0.08)] backdrop-blur-sm">
-									<ChevronsDown class="size-3" />
-									scroll for more
-								</div>
+								<div
+									v-if="showScrollListTopGlow"
+									class="pointer-events-none absolute inset-x-0 top-0 z-30 h-20"
+									style="background: radial-gradient(ellipse 80% 80px at 50% 0%, var(--color-surface), transparent)"
+								></div>
+								<div
+									v-if="showScrollListBottomGlow"
+									class="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-20"
+									style="background: radial-gradient(ellipse 80% 80px at 50% 100%, var(--color-surface), transparent)"
+								></div>
 							</div>
 						</div>
 					</section>
