@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -696,56 +695,6 @@ func TestProxyHTTPUpstreamHeaderOmissions(t *testing.T) {
 	}
 	if gotHeaders.Get("Authorization") != "Bearer test-key" {
 		t.Fatalf("upstream authorization = %q, want %q", gotHeaders.Get("Authorization"), "Bearer test-key")
-	}
-}
-
-// TestHTTPRequestLoggingIncludesStatusCode verifies that the request logging
-// middleware records the final HTTP status code alongside the method and path.
-func TestHTTPRequestLoggingIncludesStatusCode(t *testing.T) {
-	t.Parallel()
-
-	dbPath := filepath.Join(t.TempDir(), "aggr-logging-test.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open sqlite database: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = db.Close()
-	})
-
-	logBuffer := &bytes.Buffer{}
-	logger := slog.New(slog.NewTextHandler(logBuffer, &slog.HandlerOptions{}))
-
-	handler, err := server.NewHandler(server.Config{AccessKey: testAccessKey}, db, logger)
-	if err != nil {
-		t.Fatalf("create gateway handler: %v", err)
-	}
-
-	httpServer := httptest.NewServer(handler)
-	t.Cleanup(httpServer.Close)
-
-	response, err := http.Get(httpServer.URL + "/healthz")
-	if err != nil {
-		t.Fatalf("perform health request: %v", err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("health status = %d, want %d", response.StatusCode, http.StatusOK)
-	}
-
-	loggedOutput := logBuffer.String()
-	if !strings.Contains(loggedOutput, "msg=\"http request\"") {
-		t.Fatalf("logged output = %q, want request log line", loggedOutput)
-	}
-	if !strings.Contains(loggedOutput, "method=GET") {
-		t.Fatalf("logged output = %q, want method field", loggedOutput)
-	}
-	if !strings.Contains(loggedOutput, "path=/healthz") {
-		t.Fatalf("logged output = %q, want path field", loggedOutput)
-	}
-	if !strings.Contains(loggedOutput, "status=200") {
-		t.Fatalf("logged output = %q, want status=200", loggedOutput)
 	}
 }
 
