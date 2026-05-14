@@ -27,7 +27,7 @@ const tooltipFormatter = new Intl.DateTimeFormat(undefined, {
 })
 
 const maxConsumedTokens = computed(() =>
-	Math.max(1, ...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens)),
+	Math.max(0, ...props.buckets.map((bucket) => bucket.cachedInputTokens + bucket.nonCachedInputTokens + bucket.outputTokens)),
 )
 
 // bucketStart parses the RFC3339 bucket start timestamp so labels and tooltips
